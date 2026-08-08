@@ -17,6 +17,8 @@
 // de toda listagem (e 404 no GET /:id deles); com LEFT eles continuam
 // aparecendo, só caem no fallback de formatarPrestador() abaixo (nome
 // próprio da tabela prestadores, sem avatar customizado).
+const { capasDisponiveis } = require("../midia");
+
 const SELECT_PRESTADORES_COM_NOTA = `
     SELECT
         p.*,
@@ -38,6 +40,15 @@ function formatarPrestador(linha) {
     // tem avatar customizado — não existe conta nenhuma por trás pra ter
     // subido uma foto própria.
     const temDono = !!linha.dono_usuario_id;
+
+    // Checagem real de filesystem (ver utils/midia.js) — feita uma vez
+    // aqui, no único lugar que monta o JSON público do prestador, pra
+    // NUNCA mais o front precisar adivinhar via 404 se um slot de capa
+    // existe. Prestador sem dono (demo) não tem pasta nenhuma; todos os
+    // campos saem false sem tocar o disco.
+    const capas = temDono
+        ? capasDisponiveis(linha.dono_usuario_id, linha.pasta_posicao)
+        : { capa: false, capa2: false, capa3: false, capa4: false, video: false };
 
     return {
         id: linha.id,
@@ -62,7 +73,11 @@ function formatarPrestador(linha) {
         // um booleano) quanto como cache-bust na URL (?v=...) — ver
         // avatarUrlEfetivo em 00-script.js. Virar booleano aqui destruiria
         // essa segunda informação e a foto nova nunca apareceria pra quem
-        // já tinha a antiga em cache.
+        // já tinha a antiga em cache. Já é seguro do jeito que está: só é
+        // gravado no banco DEPOIS que o arquivo é escrito com sucesso (ver
+        // POST /:id/avatar em routes/usuarios.js), então nunca aponta pra
+        // um arquivo que não existe — diferente da capa, não precisou de
+        // um campo "disponível" novo.
         avatarCustomizado: temDono ? (linha.dono_avatar_customizado || 0) : 0,
         capaTipo: linha.capa_tipo || "foto",
         // Caminho relativo até a PASTA de capa (não o arquivo em si) —
@@ -74,9 +89,21 @@ function formatarPrestador(linha) {
         // só aqui, um lugar só, e nunca mais corre risco de dessincronizar
         // do que o backend realmente grava (ver routes/prestadores.js,
         // pastaPrestador()). null pros 6 prestadores demo (sem dono,
-        // logo sem pasta de upload nenhuma) — o front já cai no
-        // placeholder normal via onerror nesse caso.
+        // logo sem pasta de upload nenhuma).
         capaBase: temDono ? `/${linha.dono_usuario_id}-p-${linha.pasta_posicao}/capa` : null,
+        // NOVO — booleano explícito por slot, checado no disco (ver
+        // utils/midia.js). O front usa isso pra decidir SE tenta a URL,
+        // em vez de montar `${capaBase}/capa-2.webp` às cegas e só
+        // descobrir que não existe quando o navegador já disparou o
+        // request e o servidor já respondeu 404 (isso inflava "Erros
+        // hoje" no painel admin com um estado normal — "só subiu 1
+        // foto" não é um erro de sistema). capaDisponivel cobre o
+        // caso mais comum (slot 1, usado em toda lista/card/pin de
+        // mapa); capasDisponiveis cobre o carrossel de 4 fotos no
+        // perfil completo.
+        capaDisponivel: capas.capa,
+        capasDisponiveis: [capas.capa, capas.capa2, capas.capa3, capas.capa4],
+        capaVideoDisponivel: capas.video,
         // SEMPRE booleano, nunca o número em si — o CPF/CNPJ da conta é
         // dado sensível, não tem motivo pra sair de "Preferências da
         // conta" pra um endpoint público. O selo (ver badgeDocumentoHTML

@@ -100,6 +100,10 @@ CREATE TABLE IF NOT EXISTS notificacoes (
 
 CREATE INDEX IF NOT EXISTS idx_avaliacoes_prestador ON avaliacoes(prestador_id, status);
 CREATE INDEX IF NOT EXISTS idx_salvos_usuario ON salvos(usuario_id);
+-- Usado em toda listagem/JOIN de prestadores por dono (formatarPrestador.js,
+-- subquery de totalPrestadores em admin.js) — sem isso é table scan em
+-- `prestadores` a cada linha de usuário listada no painel.
+CREATE INDEX IF NOT EXISTS idx_prestadores_dono ON prestadores(dono_usuario_id);
 -- lida=0 primeiro seria ideal, mas a lista sempre ordena por criado_em DESC
 -- (mais recente no topo, lida ou não) — este índice já cobre os dois usos
 -- reais: contagem de não lidas (nao-lidas) e listagem geral (GET /).
@@ -118,3 +122,78 @@ CREATE TABLE IF NOT EXISTS auditoria_contas (
     criado_em INTEGER NOT NULL,
     excluido_em INTEGER NOT NULL
 );
+
+-- ==========================================================================
+-- LOG_CADASTROS — snapshot completo do momento exato em que uma conta foi
+-- criada (POST /entrar-google, ramo "conta nova" — ver routes/usuarios.js).
+-- Existe separado de `usuarios` por um motivo específico: ao contrário do
+-- resto do app, este registro NÃO é apagado quando a conta é excluída —
+-- decisão deliberada (fins de auditoria), confirmada explicitamente,
+-- diferente do padrão de exclusão total usado em todo o resto do schema.
+--
+-- Por isso, igual auditoria_contas: usuario_id SEM FOREIGN KEY (a conta
+-- pode não existir mais no momento em que esta linha é lida) e os dados
+-- pessoais (nome, email) ficam DUPLICADOS aqui como estavam no instante do
+-- cadastro — não é um espelho ao vivo de `usuarios`, é uma fotografia
+-- congelada. Se o usuário editar nome depois, este registro não muda.
+--
+-- criado_em: timestamp em ms (Date.now()) — já é "horário exato" por
+-- natureza, sem precisar de coluna extra.
+-- latitude/longitude: só gravados quando o app tem permissão de
+-- localização concedida (enviados pelo cliente no corpo de
+-- POST /entrar-google) — NULL quando a pessoa negou/não tinha permissão
+-- ainda nesse primeiro login.
+-- pais/estado/municipio: resolvidos via geocoding reverso (Nominatim/
+-- OpenStreetMap, gratuito — ver utils/localizacao.js) a partir de
+-- latitude/longitude. NULL se o geocoding falhar ou não tiver coordenada
+-- — nunca bloqueia a criação da conta em si (ver comentário na rota).
+CREATE TABLE IF NOT EXISTS log_cadastros (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id TEXT NOT NULL,
+    nome_completo TEXT NOT NULL,
+    email TEXT,
+    ip TEXT,
+    porta INTEGER,
+    latitude REAL,
+    longitude REAL,
+    pais TEXT,
+    estado TEXT,
+    municipio TEXT,
+    criado_em INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_log_cadastros_usuario ON log_cadastros(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_log_cadastros_criado ON log_cadastros(criado_em DESC);
+
+-- ==========================================================================
+-- REQUEST_LOGS — uma linha por request que passa pelo servidor (autenticada
+-- ou não, incluindo estáticos), gravada pelo middleware logRequisicao em
+-- server.js. Alimenta o painel interno (routes/admin.js/dashboard). Faltava
+-- essa tabela no schema — o INSERT já existia em server.js, mas como roda
+-- dentro de um try/catch silencioso (não pode derrubar a request real por
+-- causa do log), a ausência da tabela nunca quebrava nada visivelmente: só
+-- fazia o log falhar em silêncio a cada request, sem gravar nada.
+--
+-- Sem FOREIGN KEY em usuario_id de propósito: precisa continuar existindo
+-- mesmo depois que a conta é excluída (mesmo raciocínio de auditoria_contas/
+-- log_cadastros — log é histórico, não deve sumir junto com a conta nem
+-- travar a exclusão dela).
+-- ==========================================================================
+CREATE TABLE IF NOT EXISTS request_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    metodo TEXT NOT NULL,
+    rota TEXT NOT NULL,
+    status_code INTEGER NOT NULL,
+    duracao_ms INTEGER NOT NULL,
+    usuario_id TEXT,
+    ip TEXT,
+    porta INTEGER,           -- ver ressalva sobre porta de proxy vs cliente real na migração em db.js
+    user_agent TEXT,
+    criado_em INTEGER NOT NULL
+);
+
+-- criado_em DESC cobre o uso principal (últimas requests, mais recente
+-- primeiro). status_code incluído pra permitir filtrar erros (>=400) sem
+-- table scan, útil pra um card futuro tipo "erros recentes" no painel.
+CREATE INDEX IF NOT EXISTS idx_request_logs_criado ON request_logs(criado_em DESC);
+CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(status_code, criado_em DESC);

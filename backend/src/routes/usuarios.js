@@ -13,6 +13,7 @@ const { formatarPrestador, SELECT_PRESTADORES_COM_NOTA } = require("../utils/for
 const { criarNotificacao } = require("../utils/criarNotificacao");
 const { validarTelefone } = require("../utils/telefone");
 const { validarCpfCnpj, digitosCpfCnpj } = require("../utils/cpfCnpj");
+const { obterLocalizacaoPorCoordenadas } = require("../utils/localizacao");
 
 const router = express.Router();
 
@@ -128,7 +129,7 @@ router.post("/entrar-google", async (req, res) => {
         return res.status(500).json({ erro: "Servidor sem JWT_SECRET configurado (ver .env)." });
     }
 
-    const { credential } = req.body;
+    const { credential, latitude, longitude } = req.body;
     if (!credential) return res.status(400).json({ erro: "credential é obrigatório." });
 
     let payload;
@@ -157,6 +158,57 @@ router.post("/entrar-google", async (req, res) => {
         `).run(novo);
         garantirPastaUsuario(novo.id); // cria a pasta da conta já no cadastro
         usuario = { id: novo.id, nome: novo.nome, email: novo.email, telefone: null, cpfCnpj: null, avatarUrl: novo.avatar_url, avatarCustomizado: 0 };
+
+        // ==================================================================
+        // LOG_CADASTROS — snapshot do momento exato da criação da conta (ver
+        // schema.sql). Só roda no ramo "conta nova", nunca em login de conta
+        // existente — é um registro do EVENTO de cadastro, não um espelho
+        // contínuo. Geocoding é feito ANTES de responder ao cliente (não em
+        // segundo plano) de propósito: se rodasse depois via
+        // setTimeout/fire-and-forget, um restart do servidor no meio
+        // perderia a gravação silenciosamente, e não tem uma fila de retry
+        // aqui pra cobrir isso. O timeout de 5s do Nominatim (ver
+        // utils/localizacao.js) limita o quanto isso atrasa o login em caso
+        // de lentidão do serviço externo.
+        //
+        // req.ip: já reflete X-Forwarded-For de verdade porque
+        // "trust proxy" está ligado (ver server.js) — é o IP real de quem
+        // fez a request, não o do Nginx na frente.
+        //
+        // req.socket.remotePort: ATENÇÃO — essa é a porta da conexão TCP
+        // que chega no processo Node, ou seja, a porta do Nginx (proxy
+        // reverso), não a porta de origem do celular do usuário. Uma porta
+        // de cliente típica não sobrevive a um proxy reverso sem
+        // configuração explícita nele (Nginx não repassa isso por padrão,
+        // não existe um "X-Forwarded-Port" equivalente pra porta de
+        // ORIGEM). Gravamos mesmo assim porque foi pedido explicitamente,
+        // mas o valor é da perna proxy→Node, não do cliente de fato — se
+        // precisar da porta real do cliente, o Nginx precisaria expor
+        // $remote_port num header próprio (ex: X-Client-Port) pra gente ler
+        // aqui.
+        try {
+            const localizacao = await obterLocalizacaoPorCoordenadas(latitude, longitude);
+            db.prepare(`
+                INSERT INTO log_cadastros (usuario_id, nome_completo, email, ip, porta, latitude, longitude, pais, estado, municipio, criado_em)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                novo.id,
+                nome,
+                email,
+                req.ip || null,
+                req.socket ? req.socket.remotePort : null,
+                latitude ?? null,
+                longitude ?? null,
+                localizacao.pais,
+                localizacao.estado,
+                localizacao.municipio,
+                novo.criado_em
+            );
+        } catch (erro) {
+            // Nunca derruba a criação da conta por causa do log de
+            // auditoria — mesmo princípio de criarNotificacao().
+            console.error("Falha ao gravar log_cadastros:", erro);
+        }
     } else {
         // Login em conta já existente: a foto do Google pode ter mudado
         // desde o último login — atualiza pra manter em sincronia (é só

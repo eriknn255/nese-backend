@@ -50,4 +50,43 @@ function exigirUsuario(req, res, next) {
     next();
 }
 
-module.exports = { identificarUsuario, exigirUsuario };
+// ==========================================================================
+// PRESENÇA — grava usuarios.last_seen_at a cada request autenticada, usado
+// só pelo painel interno (routes/admin.js) pra calcular "usuários ativos".
+// Throttled em memória (Map usuarioId -> timestamp da última gravação): sem
+// isso, cada request autenticada (e o app faz várias por minuto de uso
+// normal) viraria um UPDATE no SQLite, sem necessidade nenhuma pra uma
+// métrica que só precisa de granularidade de minutos, não de milissegundo.
+//
+// O Map cresce com o número de usuários DIFERENTES que passaram pelo
+// servidor desde o último restart, não a cada request — pm2 reinicia o
+// processo periodicamente de qualquer forma (deploy, crash recovery), o
+// que já limpa o Map sozinho; não é um vazamento de memória de longo prazo
+// pro tamanho de base de usuários que esse app tem hoje. Se um dia isso
+// virar um problema de verdade, dá pra trocar por um LRU com tamanho
+// máximo — não vale a complexidade agora.
+const ULTIMA_GRAVACAO_PRESENCA = new Map();
+const THROTTLE_PRESENCA_MS = 60 * 1000; // no máximo 1 UPDATE por usuário por minuto
+
+function registrarPresenca(req, res, next) {
+    if (!req.usuario) return next(); // request anônima, nada a registrar
+
+    const agora = Date.now();
+    const ultimaGravacao = ULTIMA_GRAVACAO_PRESENCA.get(req.usuario.id);
+
+    if (!ultimaGravacao || agora - ultimaGravacao >= THROTTLE_PRESENCA_MS) {
+        ULTIMA_GRAVACAO_PRESENCA.set(req.usuario.id, agora);
+        // Sem esperar/tratar erro de propósito — presença é um "extra",
+        // igual criarNotificacao(): uma falha aqui nunca pode derrubar a
+        // request de verdade que o usuário está fazendo.
+        try {
+            db.prepare("UPDATE usuarios SET last_seen_at = ? WHERE id = ?").run(agora, req.usuario.id);
+        } catch (erro) {
+            console.error("Falha ao registrar presença:", erro);
+        }
+    }
+
+    next();
+}
+
+module.exports = { identificarUsuario, exigirUsuario, registrarPresenca };
