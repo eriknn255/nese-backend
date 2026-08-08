@@ -1,4 +1,4 @@
-const db = require("./db");
+const db = require("../db");
 
 // ==========================================================================
 // GEOLOCALIZAÇÃO POR IP — usada só pela aba "Segurança" do painel (ver
