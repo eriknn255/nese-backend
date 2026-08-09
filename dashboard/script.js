@@ -1535,11 +1535,15 @@ function renderMapaDensidade(prestadores) {
 // servidor — o load() roda a cada 30s) NÃO deveria apagar ele: é melhor
 // deixar o heatmap com dado um ciclo desatualizado na tela do que fazer o
 // mapa inteiro sumir e resetar zoom/posição a cada soluço de rede. Essa
-// troca foi o que causava o "mapa some de repente".
-// Container sobrescrito por innerHTML (mensagem de erro/"sem token")
-// invalida a instância do Leaflet que estava montada nele — força
-// recriar o mapa do zero na próxima chamada bem-sucedida.
+// troca foi o que causava o "mapa some de repente" (e, com o tempo,
+// "trava": cada recriação deixava a instância antiga do Leaflet
+// (listeners, tiles em voo) órfã, vazando memória e degradando a aba aos
+// poucos até travar).
 function renderMapaDensidadeErro(mensagem) {
+  if (mapaDensidade) {
+    console.error('Falha ao atualizar mapa de densidade (mapa existente preservado na tela):', mensagem);
+    return;
+  }
   document.getElementById('mapa-densidade-prestadores').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
   mapaDensidade = null;
   camadaHeatDensidade = null;
@@ -1962,6 +1966,17 @@ function ativarAba(nomeAba) {
   // podem ter sido (re)criados enquanto esta aba estava escondida.
   if (nomeAba === 'graficos-tecnico' || nomeAba === 'graficos-comercial') {
     redimensionarGraficosArea();
+  }
+
+  // Mesmo problema do Chart.js acima, só que no Leaflet: se o mapa foi
+  // criado (ou o heatmap foi atualizado) enquanto a aba "Visão geral"
+  // estava com `hidden`, o container era 0x0 no momento em que o Leaflet
+  // calculou o tamanho — sem invalidateSize() ele fica com tiles faltando/
+  // desalinhados até alguém arrastar ou dar zoom manualmente. Chamado só
+  // ao ENTRAR na aba (não a cada load()), senão recalcula sem necessidade
+  // a cada 30s com a aba já visível.
+  if (nomeAba === 'visao-geral' && mapaDensidade) {
+    mapaDensidade.invalidateSize();
   }
 }
 
