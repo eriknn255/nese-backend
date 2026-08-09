@@ -197,3 +197,10 @@ CREATE TABLE IF NOT EXISTS request_logs (
 -- table scan, útil pra um card futuro tipo "erros recentes" no painel.
 CREATE INDEX IF NOT EXISTS idx_request_logs_criado ON request_logs(criado_em DESC);
 CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(status_code, criado_em DESC);
+-- Cobre o padrão específico da aba Segurança (GET /dashboard/seguranca/ips
+-- em routes/admin.js): WHERE ip IS NOT NULL AND criado_em >= ? GROUP BY ip.
+-- idx_request_logs_criado já ajuda no filtro de janela, mas o GROUP BY ip
+-- em cima disso ainda force o SQLite a materializar e agrupar sem apoio de
+-- índice; com (ip, criado_em) o motor consegue ler os agrupamentos direto
+-- do índice em vez de tocar a tabela inteira pra cada IP.
+CREATE INDEX IF NOT EXISTS idx_request_logs_ip_criado ON request_logs(ip, criado_em);
