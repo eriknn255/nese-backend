@@ -5,6 +5,7 @@ const express = require("express");
 const db = require("../db");
 const { obterLocalizacoesEmLote } = require("../utils/ipLocalizacao");
 const { temAlgumaCapa } = require("../utils/midia");
+const { limparRequestLogsAntigos } = require("../jobs/limparRequestLogs");
 
 const router = express.Router();
 
@@ -286,6 +287,30 @@ router.get("/dashboard/requests", exigirAdmin, (req, res) => {
     // à parte, caro de rodar em toda request só pra isso). Usada pelo
     // front só pra decidir se mostra o botão "Carregar mais".
     res.json({ requests: linhas, temMais: linhas.length === limite });
+});
+
+// ==========================================================================
+// DELETE /api/admin/dashboard/requests
+// Botão "Limpar logs" do painel — dispara sob demanda a MESMA limpeza que
+// já roda sozinha 1x/dia (ver jobs/limparRequestLogs.js), em vez de esperar
+// o próximo ciclo automático. Reusa limparRequestLogsAntigos() de propósito:
+// uma função só decide "o que é velho" (LOG_RETENCAO_DIAS no .env, default
+// 90 dias) — o botão manual e o job automático nunca podem discordar sobre
+// isso, e não existe um segundo critério (tipo "apagar tudo") escondido
+// aqui. Isso NÃO é um "zerar tabela": só remove o que já passou da janela
+// de retenção, igual o job faria de qualquer forma no próximo dia.
+//
+// Só afeta request_logs — log_cadastros e auditoria_contas são histórico/
+// auditoria (ver comentário completo em jobs/limparRequestLogs.js) e não
+// têm rota de limpeza nenhuma, manual ou automática, de propósito.
+router.delete("/dashboard/requests", exigirAdmin, (req, res) => {
+    try {
+        const { removidas, retencaoDias } = limparRequestLogsAntigos();
+        res.json({ removidas, retencaoDias });
+    } catch (erro) {
+        console.error("Falha na limpeza manual de request_logs:", erro);
+        res.status(500).json({ erro: "Falha ao limpar os logs. Ver console do servidor." });
+    }
 });
 
 // ==========================================================================
