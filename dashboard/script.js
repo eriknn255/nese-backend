@@ -29,6 +29,7 @@ const ENDPOINT_MODERACAO = 'https://nese-be.ruexinternet.com/api/admin/dashboard
 const ENDPOINT_CHURN = 'https://nese-be.ruexinternet.com/api/admin/dashboard/churn';
 const ENDPOINT_PRESTADORES_INCOMPLETOS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/prestadores-incompletos';
 const ENDPOINT_ROTAS_POPULARES = 'https://nese-be.ruexinternet.com/api/admin/dashboard/rotas-populares';
+const ENDPOINT_ERROS_HOJE = 'https://nese-be.ruexinternet.com/api/admin/dashboard/erros-hoje';
 
 // Origem do backend (ex: ""), derivada do próprio
 // ENDPOINT — usada só pra resolver caminhos relativos que vêm da API
@@ -1071,6 +1072,84 @@ async function abrirDetalhesUsuario(usuarioId) {
   }
 }
 
+// Modal do card "Erros hoje" (Visão geral) — lista crua de GET
+// /dashboard/erros-hoje, uma linha por request, mesma condição/janela do
+// número mostrado no card (ver comentário do endpoint em admin.js): abre
+// exatamente os erros que compõem aquele total, nem mais nem menos.
+// Reaproveita o mesmo padrão visual da tabela de "Requests" (badge
+// vermelho pro status, id-mono pra rota/ip) pra não introduzir um estilo
+// novo só pra esta lista.
+function renderModalErrosHoje(data) {
+  document.getElementById('modal-titulo').textContent = `Erros hoje (${data.total})`;
+
+  if (!data.erros || data.erros.length === 0) {
+    document.getElementById('modal-body').innerHTML = '<div class="empty-state">Nenhum erro hoje. 🎉</div>';
+    return;
+  }
+
+  const linhasHtml = data.erros.map(e => `
+    <tr>
+      <td class="id-mono">${escaparHtml(e.rota)}</td>
+      <td class="id-mono">${escaparHtml(e.metodo)}</td>
+      <td><span class="count-badge erro">${e.statusCode}</span></td>
+      <td class="last-seen">${e.duracaoMs} ms</td>
+      <td class="id-mono">${escaparHtml(e.usuarioId || '—')}</td>
+      <td class="id-mono">${escaparHtml(e.ip || '—')}</td>
+      <td class="last-seen">${formatarTempoRelativo(e.criadoEm)}</td>
+    </tr>
+  `).join('');
+
+  const notaLimite = data.temMais
+    ? `<div class="modal-subsection-title">Mostrando os ${data.erros.length} mais recentes de ${data.total} — refine por rota na aba "Requests" pra ver o resto.</div>`
+    : '';
+
+  document.getElementById('modal-body').innerHTML = `
+    ${notaLimite}
+    <div class="tabela-modal-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Rota</th><th>Método</th><th>Status</th><th>Duração</th><th>Usuário</th><th>IP</th><th>Quando</th>
+          </tr>
+        </thead>
+        <tbody>${linhasHtml}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function abrirDetalhesErrosHoje() {
+  const token = getToken();
+  const overlay = document.getElementById('modal-overlay');
+
+  document.getElementById('modal-titulo').textContent = 'Erros hoje';
+  document.getElementById('modal-body').innerHTML = '<div class="empty-state">carregando…</div>';
+  overlay.removeAttribute('hidden');
+
+  if (!token) {
+    renderModalErro('Preencha o token de admin acima pra ver os detalhes.');
+    return;
+  }
+
+  try {
+    const res = await fetch(`${ENDPOINT_ERROS_HOJE}?limit=${LIMITE_ERROS_HOJE_MODAL}`, {
+      headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
+    });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderModalErrosHoje(data);
+  } catch (e) {
+    renderModalErro(`Não foi possível carregar os erros de hoje (${e.message}).`);
+  }
+}
+
+// 200 já cobre bem o volume típico de um dia sem incidente grave; se
+// tiver mais que isso, a nota "temMais" no rodapé do modal já orienta a
+// olhar a aba Requests filtrando por rota, em vez do modal tentar virar
+// uma tabela paginada só pra esse caso raro.
+const LIMITE_ERROS_HOJE_MODAL = 200;
+
 // ---- Retenção & Ativação / Avaliações / Cobertura / WhatsApp ----
 // Continuam carregando tudo junto em carregarInsights() (chamado de load()),
 // só o HTML de destino é que mudou: cada bloco agora mora na aba mais
@@ -2023,6 +2102,19 @@ async function carregarInsights(token) {
     carregarPrestadoresIncompletos(token)
   ]);
 }
+
+// Card "Erros hoje" (Visão geral) é clicável — mesmo padrão de
+// acessibilidade das linhas de usuário (clique + Enter/Espaço via
+// tabindex/role="button" no HTML) pra abrir o modal com a lista de erros
+// que compõem o número mostrado no card.
+const cardErrosHoje = document.getElementById('card-erros-hoje');
+cardErrosHoje.addEventListener('click', abrirDetalhesErrosHoje);
+cardErrosHoje.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    abrirDetalhesErrosHoje();
+  }
+});
 
 document.getElementById('modal-close-btn').addEventListener('click', fecharModal);
 
