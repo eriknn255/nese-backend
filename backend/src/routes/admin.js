@@ -147,11 +147,11 @@ router.get("/dashboard/data", exigirAdmin, (req, res) => {
 // sem permissão de localização, ou onde o Nominatim falhou, não deve
 // virar uma barra fantasma "desconhecido" competindo com dados reais.
 //
-// pontosClientes: um ponto (lat/lng cru, sem agregação) por cadastro com
+// pontosUsuarios: um ponto (lat/lng cru, sem agregação) por cadastro com
 // coordenada conhecida — mesma ideia de GET /dashboard/mapa-prestadores,
 // só que pro lado do CLIENTE em vez do prestador. Até agora só existia
 // densidade geográfica de prestador nesse painel; isso alimenta o mesmo
-// tipo de heatmap (ver renderMapaDensidadeClientes em script.js), mas
+// tipo de heatmap (ver renderMapaDensidadeUsuarios em script.js), mas
 // pra responder "onde tem CLIENTE", não "onde tem serviço oferecido" —
 // pergunta diferente da de /dashboard/cobertura (que já cruza os dois,
 // mas só agregado por município, sem a distribuição fina dentro dele).
@@ -174,12 +174,12 @@ router.get("/dashboard/localizacao", exigirAdmin, (req, res) => {
         WHERE municipio IS NOT NULL GROUP BY municipio ORDER BY total DESC
     `).all();
 
-    const pontosClientes = db.prepare(`
+    const pontosUsuarios = db.prepare(`
         SELECT latitude AS lat, longitude AS lng FROM log_cadastros
         WHERE latitude IS NOT NULL AND longitude IS NOT NULL
     `).all();
 
-    res.json({ porPais, porEstado, porMunicipio, pontosClientes });
+    res.json({ porPais, porEstado, porMunicipio, pontosUsuarios });
 });
 
 // GET /api/admin/dashboard/usuarios
