@@ -10,10 +10,11 @@
      renderGraficoArea em script.js). Gráficos categóricos (status HTTP,
      categorias) continuam em CSS puro, sem depender disso. -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<!-- Leaflet + leaflet.heat — mapa de densidade de prestadores na aba
-     "Visão geral" (ver renderMapaDensidade em script.js). Tiles vêm do
-     CartoDB (gratuito, sem chave de API, com variante clara/escura que
-     acompanha o tema do painel — ver alternarTilesMapa). -->
+<!-- Leaflet + leaflet.heat — mapas de densidade (todos os usuários na aba
+     "Visão geral", só prestadores na aba "Localização" — ver
+     renderMapaDensidadeUsuarios/renderMapaDensidade em script.js). Tiles
+     vêm do CartoDB (gratuito, sem chave de API, com variante clara/escura
+     que acompanha o tema do painel — ver alternarTilesMapa). -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
@@ -144,9 +145,9 @@
         </div>
       </div>
 
-      <div class="section-title">Densidade de prestadores <span class="section-note">(todos os prestadores com localização geocodificada, Brasil inteiro)</span></div>
+      <div class="section-title">Densidade de usuários <span class="section-note">(todos os usuários com localização resolvida, com ou sem serviços cadastrados — Brasil inteiro)</span></div>
       <div class="chart-card">
-        <div id="mapa-densidade-prestadores"><div class="empty-state">carregando…</div></div>
+        <div id="mapa-densidade-usuarios"><div class="empty-state">carregando…</div></div>
       </div>
     </section>
 
@@ -319,8 +320,9 @@
     <section class="aba-conteudo" id="aba-localizacao" hidden>
       <div class="section-title">Localização <span class="section-note">(cadastros com localização resolvida — depende de permissão de GPS/localização concedida no navegador de quem se cadastrou)</span></div>
 
+      <div class="section-title">Densidade de prestadores <span class="section-note">(só prestadores com serviço cadastrado e localização geocodificada)</span></div>
       <div class="chart-card">
-        <div id="mapa-densidade-clientes"><div class="empty-state">carregando…</div></div>
+        <div id="mapa-densidade-prestadores"><div class="empty-state">carregando…</div></div>
       </div>
 
       <div class="loc-row">
