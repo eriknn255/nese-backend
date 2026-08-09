@@ -1528,13 +1528,20 @@ function renderMapaDensidade(prestadores) {
 }
 
 // Container sobrescrito por innerHTML (mensagem de erro/"sem token")
-// invalida a instância do Leaflet que estava montada nele — força
-// recriar o mapa do zero na próxima chamada bem-sucedida.
+// invalida a instância do Leaflet que estava montada nele — só faz isso
+// quando AINDA NÃO existe um mapa de verdade na tela (primeira carga sem
+// token, por exemplo). Se já existe um mapa carregado com sucesso antes,
+// uma falha pontual neste ciclo (rede instável, timeout, hiccup do
+// servidor — o load() roda a cada 30s) NÃO deveria apagar ele: é melhor
+// deixar o heatmap com dado um ciclo desatualizado na tela do que fazer o
+// mapa inteiro sumir e resetar zoom/posição a cada soluço de rede. Essa
+// troca foi o que causava o "mapa some de repente".
 function renderMapaDensidadeErro(mensagem) {
+  if (mapaDensidade) {
+    console.warn('Falha ao atualizar o mapa de densidade — mantendo o último estado carregado com sucesso:', mensagem);
+    return;
+  }
   document.getElementById('mapa-densidade-prestadores').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
-  mapaDensidade = null;
-  camadaHeatDensidade = null;
-  camadaTilesDensidade = null;
 }
 
 async function carregarMapaPrestadores(token) {
@@ -1954,6 +1961,16 @@ function ativarAba(nomeAba) {
   if (nomeAba === 'graficos-tecnico' || nomeAba === 'graficos-comercial') {
     redimensionarGraficosArea();
   }
+
+  // Mesmo problema, mesma causa: o Leaflet do mapa de densidade também
+  // pode ter sido criado (ou só existido) enquanto "Visão geral" estava
+  // com hidden — Leaflet calcula o tamanho do container na hora da
+  // criação, e um container hidden mede 0x0. invalidateSize() força ele a
+  // remedir agora que a aba está visível de novo; sem isso o mapa aparece
+  // cortado/cinza até alguém redimensionar a janela por acaso.
+  if (nomeAba === 'visao-geral' && mapaDensidade) {
+    setTimeout(() => mapaDensidade.invalidateSize(), 0);
+  }
 }
 
 document.querySelectorAll('.sidebar-link[data-aba]').forEach(btn => {
@@ -2027,6 +2044,15 @@ async function load() {
     return;
   }
 
+  // Card de stats do topo (online agora, ativações no mês etc.) — corre
+  // por conta própria, separado do Promise.all abaixo. Antes os dois
+  // estavam no mesmo try/catch: se só ESTE fetch falhasse (timeout, 500
+  // pontual, token expirado bem nessa hora), o catch rodava ANTES do
+  // Promise.all sequer ser chamado — as outras 11 abas nunca tentavam
+  // carregar, mesmo saudáveis, e se já tivessem dado certo antes (refresh
+  // automático), o erro sobrescrevia com "não foi possível carregar" um
+  // dado que continuava bom. Separado assim, uma falha aqui afeta só os
+  // 5 cards do topo.
   try {
     const res = await fetch(ENDPOINT, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
@@ -2036,25 +2062,26 @@ async function load() {
     const data = await res.json();
     render(data);
     errorBanner.style.display = 'none';
-    // Independentes entre si (e do card de stats) — roda em paralelo em
-    // vez de esperar uma terminar pra começar a outra.
-    await Promise.all([carregarUsuarios(token), carregarRequests(token), carregarLocalizacao(token), carregarLogsCadastro(token), carregarGraficosTecnicos(token), carregarGraficosComercial(token), carregarInsights(token), carregarMapaPrestadores(token), carregarAlertas(token), carregarStatus(token), carregarSeguranca(token)]);
   } catch (e) {
     renderNoData();
-    renderUsuariosErro(`Não foi possível carregar (${e.message}).`);
-    renderRequestsErro(`Não foi possível carregar (${e.message}).`);
-    renderLocalizacaoErro(`Não foi possível carregar (${e.message}).`);
-    renderLogsCadastroErro(`Não foi possível carregar (${e.message}).`);
-    renderGraficosTecnicosErro(`Não foi possível carregar (${e.message}).`);
-    renderGraficosComerciaisErro(`Não foi possível carregar (${e.message}).`);
-    renderInsightsErro(`Não foi possível carregar (${e.message}).`);
-    renderMapaDensidadeErro(`Não foi possível carregar (${e.message}).`);
-    renderAlertasErro(`Não foi possível carregar (${e.message}).`);
-    renderStatusErro(`Não foi possível carregar (${e.message}).`);
-    renderSegurancaErro(`Não foi possível carregar (${e.message}).`);
-    errorBanner.textContent = `Erro: não foi possível carregar dados reais (${e.message}). Nenhum dado é exibido até o endpoint responder.`;
+    errorBanner.textContent = `Erro: não foi possível carregar os cards do topo (${e.message}). As outras abas seguem carregando normalmente.`;
     errorBanner.style.display = 'block';
   }
+
+  // As 11 abas — cada carregarX() já trata o próprio erro por dentro
+  // (mostra "não foi possível carregar" só naquela aba específica, via
+  // renderXErro chamado no catch de cada uma) — por isso não precisa de
+  // try/catch aqui em cima: uma falha de rede numa delas não deveria
+  // nunca derrubar as outras, e agora também não depende mais do fetch
+  // de stats acima ter dado certo. O try/catch continua só como rede de
+  // segurança contra alguma dessas funções um dia esquecer de tratar o
+  // próprio erro (regressão futura) — não deveria disparar no uso normal.
+  try {
+    await Promise.all([carregarUsuarios(token), carregarRequests(token), carregarLocalizacao(token), carregarLogsCadastro(token), carregarGraficosTecnicos(token), carregarGraficosComercial(token), carregarInsights(token), carregarMapaPrestadores(token), carregarAlertas(token), carregarStatus(token), carregarSeguranca(token)]);
+  } catch (e) {
+    console.error('Uma das abas não tratou o próprio erro internamente:', e);
+  }
+
   document.getElementById('last-update').textContent = 'última tentativa: ' + new Date().toLocaleTimeString('pt-BR');
 }
 
