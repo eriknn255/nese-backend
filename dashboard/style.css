@@ -1040,6 +1040,30 @@
     background: var(--row-hover);
   }
 
+  /* Card "Erros hoje" — clicável pra abrir o modal com a lista de erros
+     do dia. Mesmo tratamento visual (cursor + hover) das linhas
+     clicáveis da tabela de usuários, adaptado pro card. */
+  .stat-card-clicavel {
+    cursor: pointer;
+  }
+
+  .stat-card-clicavel:hover,
+  .stat-card-clicavel:focus-visible {
+    background: var(--row-hover);
+  }
+
+  .stat-card-clicavel:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+
+  /* Tabela dentro do modal de "Erros hoje" — 7 colunas não cabem sempre
+     nos 560px do .modal, então o scroll fica no wrapper (não no modal
+     inteiro), preservando o header/footer fixos do modal. */
+  .tabela-modal-wrap {
+    overflow-x: auto;
+  }
+
   .modal-overlay {
     position: fixed;
     inset: 0;
