@@ -912,6 +912,11 @@
     height: 620px;
     border-radius: 24px;
     overflow: hidden;
+    /* Contém o stacking context do Leaflet aqui dentro — sem isso, os
+       z-index internos do Leaflet (até 700, ver .modal-overlay) competem
+       diretamente com QUALQUER elemento posicionado no resto da página,
+       não só o modal. Com isolation, "vazam" no máximo até aqui. */
+    isolation: isolate;
   }
 
   #mapa-densidade-prestadores .empty-state,
@@ -1072,7 +1077,12 @@
     align-items: center;
     justify-content: center;
     padding: 20px;
-    z-index: 50;
+    /* Bem acima de qualquer z-index interno do Leaflet (os mapas de
+       densidade usam até 700 nas próprias camadas — tile pane, marker
+       pane, popup pane etc.). Como .leaflet-container não cria um
+       stacking context isolado, esses z-index competiam direto com o do
+       modal e o mapa acabava desenhando por cima (era só 50 antes). */
+    z-index: 9999;
   }
 
   .modal-overlay[hidden] { display: none; }
