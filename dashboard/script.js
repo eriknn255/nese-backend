@@ -43,6 +43,40 @@ const ENDPOINT_ROTAS_POPULARES = 'https://nese-be.ruexinternet.com/api/admin/das
 // customizada (upload próprio) é que usa caminho relativo.
 const BACKEND_ORIGIN = new URL(ENDPOINT).origin;
 
+// ==========================================================================
+// TIMEOUT PADRÃO PRA TODO FETCH DESTE PAINEL — sem isso, um endpoint
+// lento ou travado (query pesada no servidor, ou algo como
+// /dashboard/seguranca/ips esperando o ip-api.com externo responder)
+// deixa a seção correspondente presa em "carregando…" pra sempre: a
+// Promise do fetch nunca resolve NEM rejeita, então o catch de dentro de
+// cada carregarX() nunca dispara, o renderXErro() correspondente nunca é
+// chamado, e o placeholder inicial do HTML ("carregando…") nunca é
+// substituído — foi exatamente esse mecanismo que deixava "algumas
+// métricas sempre em carregando" no painel.
+//
+// AbortController força a Promise a rejeitar depois de TIMEOUT_FETCH_MS.
+// Essa rejeição cai no catch de cada carregarX() como qualquer outro erro
+// de rede — mesma UI, mesma mensagem de erro (agora com "tempo esgotado"
+// em vez de travar), só que com um teto de espera em vez de infinito.
+// 15s é generoso o bastante pra uma rede ruim/query pesada legítima, sem
+// deixar a pessoa esperando minutos por uma seção que nunca vai responder.
+const TIMEOUT_FETCH_MS = 15000;
+
+async function fetchComTimeout(url, options = {}) {
+  const controlador = new AbortController();
+  const timeoutId = setTimeout(() => controlador.abort(), TIMEOUT_FETCH_MS);
+  try {
+    return await fetch(url, { ...options, signal: controlador.signal });
+  } catch (erro) {
+    if (erro.name === 'AbortError') {
+      throw new Error(`tempo esgotado após ${TIMEOUT_FETCH_MS / 1000}s`);
+    }
+    throw erro;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function resolverAvatarUrl(avatarEfetivo) {
   if (!avatarEfetivo) return null;
   // Já é absoluta (foto do Google) — usa como veio.
@@ -288,7 +322,7 @@ document.getElementById('usuarios-busca').addEventListener('input', aplicarFiltr
 
 async function carregarUsuarios(token) {
   try {
-    const res = await fetch(ENDPOINT_USUARIOS, {
+    const res = await fetchComTimeout(ENDPOINT_USUARIOS, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
@@ -391,7 +425,7 @@ document.getElementById('requests-limpar-btn').addEventListener('click', async (
   btn.textContent = 'Limpando…';
 
   try {
-    const res = await fetch(ENDPOINT_REQUESTS, {
+    const res = await fetchComTimeout(ENDPOINT_REQUESTS, {
       method: 'DELETE',
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
@@ -410,7 +444,7 @@ document.getElementById('requests-limpar-btn').addEventListener('click', async (
 
 async function carregarRequests(token) {
   try {
-    const res = await fetch(`${ENDPOINT_REQUESTS}?limit=${limiteRequests}`, {
+    const res = await fetchComTimeout(`${ENDPOINT_REQUESTS}?limit=${limiteRequests}`, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
@@ -493,7 +527,7 @@ document.getElementById('logs-cadastro-exportar-btn').addEventListener('click', 
 
 async function carregarLogsCadastro(token) {
   try {
-    const res = await fetch(`${ENDPOINT_LOGS_CADASTRO}?limit=${limiteLogsCadastro}`, {
+    const res = await fetchComTimeout(`${ENDPOINT_LOGS_CADASTRO}?limit=${limiteLogsCadastro}`, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
@@ -820,7 +854,7 @@ function renderErrosPorRota(porRota) {
 
 async function carregarGraficosTecnicosPrincipais(token) {
   try {
-    const res = await fetch(ENDPOINT_GRAFICOS_TECNICOS, {
+    const res = await fetchComTimeout(ENDPOINT_GRAFICOS_TECNICOS, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
@@ -840,7 +874,7 @@ async function carregarGraficosTecnicosPrincipais(token) {
 
 async function carregarErrosPorRota(token) {
   try {
-    const res = await fetch(ENDPOINT_ERROS_POR_ROTA, {
+    const res = await fetchComTimeout(ENDPOINT_ERROS_POR_ROTA, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
@@ -864,7 +898,7 @@ async function carregarGraficosTecnicos(token) {
 
 async function carregarGraficosComercial(token) {
   try {
-    const res = await fetch(`${ENDPOINT_GRAFICOS_COMERCIAL}?dias=${diasCadastros}`, {
+    const res = await fetchComTimeout(`${ENDPOINT_GRAFICOS_COMERCIAL}?dias=${diasCadastros}`, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
@@ -901,7 +935,7 @@ function renderLocalizacaoErro(mensagem) {
 
 async function carregarLocalizacao(token) {
   try {
-    const res = await fetch(ENDPOINT_LOCALIZACAO, {
+    const res = await fetchComTimeout(ENDPOINT_LOCALIZACAO, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
@@ -1010,7 +1044,7 @@ async function abrirDetalhesUsuario(usuarioId) {
   }
 
   try {
-    const res = await fetch(ENDPOINT_USUARIO_DETALHE_BASE + encodeURIComponent(usuarioId), {
+    const res = await fetchComTimeout(ENDPOINT_USUARIO_DETALHE_BASE + encodeURIComponent(usuarioId), {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
@@ -1051,7 +1085,7 @@ function renderTabelaRetencao(coortes) {
 
 async function carregarRetencao(token) {
   try {
-    const res = await fetch(ENDPOINT_RETENCAO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_RETENCAO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1079,7 +1113,7 @@ function renderFunil(data) {
 
 async function carregarFunil(token) {
   try {
-    const res = await fetch(ENDPOINT_FUNIL, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_FUNIL, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1109,7 +1143,7 @@ function renderContasMortas(data) {
 
 async function carregarContasMortas(token) {
   try {
-    const res = await fetch(ENDPOINT_CONTAS_MORTAS, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_CONTAS_MORTAS, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1140,7 +1174,7 @@ function renderNotaPorCategoria(linhas) {
 
 async function carregarAvaliacoesInsights(token) {
   try {
-    const res = await fetch(ENDPOINT_AVALIACOES_INSIGHTS, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_AVALIACOES_INSIGHTS, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1196,7 +1230,7 @@ function renderWhatsappPorCategoria(linhas) {
 
 async function carregarWhatsapp(token) {
   try {
-    const res = await fetch(ENDPOINT_WHATSAPP, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_WHATSAPP, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1225,7 +1259,7 @@ function renderCobertura(data) {
 
 async function carregarCobertura(token) {
   try {
-    const res = await fetch(ENDPOINT_COBERTURA, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_COBERTURA, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1268,7 +1302,7 @@ function renderBuscasSemResultadoErro(mensagem) {
 
 async function carregarBuscasSemResultado(token) {
   try {
-    const res = await fetch(ENDPOINT_BUSCAS_SEM_RESULTADO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_BUSCAS_SEM_RESULTADO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1315,7 +1349,7 @@ function renderDemandaNaoAtendidaErro(mensagem) {
 
 async function carregarDemandaNaoAtendida(token) {
   try {
-    const res = await fetch(ENDPOINT_DEMANDA_NAO_ATENDIDA, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_DEMANDA_NAO_ATENDIDA, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1355,7 +1389,7 @@ function renderModeracaoErro(mensagem) {
 
 async function carregarModeracao(token) {
   try {
-    const res = await fetch(ENDPOINT_MODERACAO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_MODERACAO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1385,7 +1419,7 @@ function renderChurnErro(mensagem) {
 
 async function carregarChurn(token) {
   try {
-    const res = await fetch(ENDPOINT_CHURN, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_CHURN, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1424,7 +1458,7 @@ function renderPrestadoresIncompletosErro(mensagem) {
 
 async function carregarPrestadoresIncompletos(token) {
   try {
-    const res = await fetch(ENDPOINT_PRESTADORES_INCOMPLETOS, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_PRESTADORES_INCOMPLETOS, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1458,7 +1492,7 @@ function renderRotasPopularesErro(mensagem) {
 
 async function carregarRotasPopulares(token) {
   try {
-    const res = await fetch(ENDPOINT_ROTAS_POPULARES, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_ROTAS_POPULARES, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1546,7 +1580,7 @@ function renderMapaDensidadeErro(mensagem) {
 
 async function carregarMapaPrestadores(token) {
   try {
-    const res = await fetch(ENDPOINT_MAPA_PRESTADORES, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetchComTimeout(ENDPOINT_MAPA_PRESTADORES, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1623,7 +1657,7 @@ function renderAlertasErro(mensagem) {
 
 async function carregarAlertas(token) {
   try {
-    const res = await fetch(ENDPOINT_ALERTAS, {
+    const res = await fetchComTimeout(ENDPOINT_ALERTAS, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
@@ -1761,7 +1795,7 @@ function renderStatusErro(mensagem) {
 
 async function carregarStatus(token) {
   try {
-    const res = await fetch(ENDPOINT_STATUS, {
+    const res = await fetchComTimeout(ENDPOINT_STATUS, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
@@ -1865,7 +1899,7 @@ function obterJanelaSeguranca() {
 async function carregarSeguranca(token) {
   try {
     const minutos = obterJanelaSeguranca();
-    const res = await fetch(`${ENDPOINT_SEGURANCA_IPS}?minutos=${encodeURIComponent(minutos)}`, {
+    const res = await fetchComTimeout(`${ENDPOINT_SEGURANCA_IPS}?minutos=${encodeURIComponent(minutos)}`, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
@@ -2054,7 +2088,7 @@ async function load() {
   // dado que continuava bom. Separado assim, uma falha aqui afeta só os
   // 5 cards do topo.
   try {
-    const res = await fetch(ENDPOINT, {
+    const res = await fetchComTimeout(ENDPOINT, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
