@@ -124,24 +124,28 @@
           <div class="stat-value green" id="stat-online-agora">—</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Ativos hoje</div>
-          <div class="stat-value green" id="stat-ativos-hoje">—</div>
+          <div class="stat-label">Ativações de conta/mês</div>
+          <div class="stat-value green" id="stat-ativacoes-conta-mes">—</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Ativações no mês</div>
-          <div class="stat-value teal" id="stat-ativacoes-mes">—</div>
+          <div class="stat-label">Exclusões de conta/mês</div>
+          <div class="stat-value teal" id="stat-exclusoes-conta-mes">—</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Serviços cadastrados</div>
-          <div class="stat-value purple" id="stat-total-servicos">—</div>
+          <div class="stat-label">Prestadores do mês <span class="section-note">(Top 1 serviço mais procurado)</span></div>
+          <div class="stat-value purple" id="stat-prestadores-mes-top-servico">—</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Status</div>
           <div class="stat-value" id="stat-status-nivel">—</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card-com-badge">
           <div class="stat-label">Erros hoje</div>
           <div class="stat-value red" id="stat-erros-hoje">—</div>
+          <!-- % relativa de erros hoje (errosHoje / ativosHoje) — ver cálculo
+               e classes de severidade (baixo/medio/alto) em atualizarBadgeErrosHoje,
+               script.js. -->
+          <span class="stat-pct-badge" id="stat-erros-pct-badge" hidden></span>
         </div>
       </div>
 
