@@ -107,10 +107,21 @@ router.get("/dashboard/data", exigirAdmin, (req, res) => {
     const inicioMes = new Date();
     inicioMes.setDate(1);
     inicioMes.setHours(0, 0, 0, 0);
+    const inicioMesMs = inicioMes.getTime();
 
     const { total: ativacoesMes } = db.prepare(
         "SELECT COUNT(*) AS total FROM usuarios WHERE criado_em >= ?"
-    ).get(inicioMes.getTime());
+    ).get(inicioMesMs);
+
+    // Exclusões de conta do mês — mesma fonte e mesmo raciocínio do
+    // totalExcluidas em GET /dashboard/churn: auditoria_contas sobrevive à
+    // exclusão da conta (usuarios não tem mais a linha depois de excluída),
+    // então é a única forma de contar isso. Aqui a janela é fixa "mês
+    // corrente" (pro card "Exclusões de conta/mês" da Visão geral),
+    // diferente de churn que aceita ?dias= arbitrário.
+    const { total: exclusoesMes } = db.prepare(
+        "SELECT COUNT(*) AS total FROM auditoria_contas WHERE excluido_em >= ?"
+    ).get(inicioMesMs);
 
     const { total: onlineAgora } = db.prepare(
         "SELECT COUNT(*) AS total FROM usuarios WHERE last_seen_at >= ?"
@@ -120,6 +131,29 @@ router.get("/dashboard/data", exigirAdmin, (req, res) => {
         "SELECT COUNT(*) AS total FROM prestadores"
     ).get();
 
+    // Prestadores cadastrados no mês corrente, por categoria — top 1 pra
+    // alimentar o card "Prestadores do mês (Top 1 serviço mais
+    // procurado)". "Mais procurado" aqui é a categoria com mais NOVOS
+    // prestadores no mês (não existe log de busca com resultado no
+    // schema — buscas_sem_resultado só guarda buscas que NÃO acharam
+    // nada, o oposto do que esse card quer dizer); é o melhor proxy real
+    // disponível pra "serviço em alta": categoria que mais gente decidiu
+    // oferecer esse mês tende a ser a que tem mais demanda percebida.
+    // null (sem string formatada) se ninguém cadastrou serviço este mês —
+    // o front já trata null como "—", não inventa "nenhum" nem 0.
+    const topCategoriaMes = db.prepare(`
+        SELECT categoria, COUNT(*) AS total
+        FROM prestadores
+        WHERE criado_em >= ?
+        GROUP BY categoria
+        ORDER BY total DESC
+        LIMIT 1
+    `).get(inicioMesMs);
+
+    const prestadoresMesTopServico = topCategoriaMes
+        ? `${topCategoriaMes.categoria} (${topCategoriaMes.total})`
+        : null;
+
     const { total: errosHoje } = db.prepare(
         `SELECT COUNT(*) AS total FROM request_logs WHERE ${CONDICAO_SQL_ERRO} AND criado_em >= ?`
     ).get(inicioHoje);
@@ -128,8 +162,10 @@ router.get("/dashboard/data", exigirAdmin, (req, res) => {
         stats: {
             ativosHoje,
             ativacoesMes,
+            exclusoesMes,
             onlineAgora,
             totalServicos,
+            prestadoresMesTopServico,
             errosHoje
         }
     });
