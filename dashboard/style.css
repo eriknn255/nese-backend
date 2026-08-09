@@ -883,7 +883,7 @@
   .area-chart .empty-state { margin: auto; }
 
   #mapa-densidade-prestadores,
-  #mapa-densidade-clientes {
+  #mapa-densidade-usuarios {
     position: relative;
     height: 620px;
     border-radius: 24px;
@@ -891,7 +891,7 @@
   }
 
   #mapa-densidade-prestadores .empty-state,
-  #mapa-densidade-clientes .empty-state {
+  #mapa-densidade-usuarios .empty-state {
     position: absolute;
     inset: 0;
     display: flex;
@@ -900,14 +900,14 @@
   }
 
   #mapa-densidade-prestadores .leaflet-control-zoom a,
-  #mapa-densidade-clientes .leaflet-control-zoom a {
+  #mapa-densidade-usuarios .leaflet-control-zoom a {
     background: var(--panel);
     color: var(--ink);
     border-color: var(--border);
   }
 
   #mapa-densidade-prestadores .leaflet-control-attribution,
-  #mapa-densidade-clientes .leaflet-control-attribution {
+  #mapa-densidade-usuarios .leaflet-control-attribution {
     background: var(--panel);
     color: var(--muted);
     font-family: var(--font-mono);
