@@ -159,12 +159,36 @@
   }
 
   .stat-card {
+    position: relative;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 14px 16px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
   }
+
+  /* Badge pequeno no canto superior direito do card (ex: % relativa de
+     erros hoje). Cor muda por severidade — ver classes .baixo/.medio/.alto,
+     definidas com as MESMAS variáveis de cor já usadas em .stat-value, pra
+     ficar consistente com o resto do painel (verde = ok, laranja = atenção,
+     vermelho = crítico). */
+  .stat-pct-badge {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 3px 6px;
+    border-radius: 999px;
+    background: var(--badge-bg-zero);
+    color: var(--muted);
+  }
+
+  .stat-pct-badge.baixo { background: rgba(0, 176, 68, 0.12); color: var(--green); }
+  .stat-pct-badge.medio { background: rgba(217, 143, 82, 0.14); color: var(--orange); }
+  .stat-pct-badge.alto { background: rgba(211, 18, 0, 0.12); color: var(--red); }
 
   .stat-label {
     font-size: 10.5px;
