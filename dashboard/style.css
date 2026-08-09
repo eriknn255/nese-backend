@@ -882,14 +882,16 @@
 
   .area-chart .empty-state { margin: auto; }
 
-  #mapa-densidade-prestadores {
+  #mapa-densidade-prestadores,
+  #mapa-densidade-clientes {
     position: relative;
     height: 620px;
     border-radius: 24px;
     overflow: hidden;
   }
 
-  #mapa-densidade-prestadores .empty-state {
+  #mapa-densidade-prestadores .empty-state,
+  #mapa-densidade-clientes .empty-state {
     position: absolute;
     inset: 0;
     display: flex;
@@ -897,13 +899,15 @@
     justify-content: center;
   }
 
-  #mapa-densidade-prestadores .leaflet-control-zoom a {
+  #mapa-densidade-prestadores .leaflet-control-zoom a,
+  #mapa-densidade-clientes .leaflet-control-zoom a {
     background: var(--panel);
     color: var(--ink);
     border-color: var(--border);
   }
 
-  #mapa-densidade-prestadores .leaflet-control-attribution {
+  #mapa-densidade-prestadores .leaflet-control-attribution,
+  #mapa-densidade-clientes .leaflet-control-attribution {
     background: var(--panel);
     color: var(--muted);
     font-family: var(--font-mono);
