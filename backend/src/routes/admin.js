@@ -146,6 +146,18 @@ router.get("/dashboard/data", exigirAdmin, (req, res) => {
 // GROUP BY ignora NULL de propósito (WHERE ... IS NOT NULL): cadastro
 // sem permissão de localização, ou onde o Nominatim falhou, não deve
 // virar uma barra fantasma "desconhecido" competindo com dados reais.
+//
+// pontosClientes: um ponto (lat/lng cru, sem agregação) por cadastro com
+// coordenada conhecida — mesma ideia de GET /dashboard/mapa-prestadores,
+// só que pro lado do CLIENTE em vez do prestador. Até agora só existia
+// densidade geográfica de prestador nesse painel; isso alimenta o mesmo
+// tipo de heatmap (ver renderMapaDensidadeClientes em script.js), mas
+// pra responder "onde tem CLIENTE", não "onde tem serviço oferecido" —
+// pergunta diferente da de /dashboard/cobertura (que já cruza os dois,
+// mas só agregado por município, sem a distribuição fina dentro dele).
+// Usa latitude/longitude CRUS (não pais/estado/municipio) pelo mesmo
+// motivo do endpoint de prestadores: o heatmap precisa dos pontos
+// individuais, agregar por município perderia a distribuição interna.
 router.get("/dashboard/localizacao", exigirAdmin, (req, res) => {
     const porPais = db.prepare(`
         SELECT pais, COUNT(*) AS total FROM log_cadastros
@@ -162,7 +174,12 @@ router.get("/dashboard/localizacao", exigirAdmin, (req, res) => {
         WHERE municipio IS NOT NULL GROUP BY municipio ORDER BY total DESC
     `).all();
 
-    res.json({ porPais, porEstado, porMunicipio });
+    const pontosClientes = db.prepare(`
+        SELECT latitude AS lat, longitude AS lng FROM log_cadastros
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+    `).all();
+
+    res.json({ porPais, porEstado, porMunicipio, pontosClientes });
 });
 
 // GET /api/admin/dashboard/usuarios
@@ -1718,9 +1735,6 @@ router.get("/dashboard/seguranca/ips", exigirAdmin, async (req, res) => {
     // alguém tentando adivinhar o token admin ou escaneando rotas sem
     // credencial. Excluir aqui faria o painel parar de detectar o próprio
     // tipo de abuso que esta aba existe pra flagar.
-    //
-    // Depende de um índice em request_logs(ip, criado_em) pra não fazer
-    // full table scan a cada refresh — ver migração em db.js.
     const linhas = db.prepare(`
         SELECT
             ip,
