@@ -370,6 +370,44 @@ document.getElementById('requests-exportar-btn').addEventListener('click', () =>
   ], requestsListaCompleta);
 });
 
+// Limpeza manual — dispara sob demanda a MESMA janela de retenção que já
+// roda sozinha 1x/dia no servidor (DELETE /dashboard/requests reusa
+// limparRequestLogsAntigos(), ver jobs/limparRequestLogs.js). NÃO apaga
+// tudo, só o que já passou dos 90 dias — mas ainda é destrutivo e sem
+// volta, por isso o confirm() antes de disparar.
+document.getElementById('requests-limpar-btn').addEventListener('click', async () => {
+  const confirmado = confirm('Remover da tabela request_logs tudo com mais de 90 dias?\n\nEssa ação roda direto no banco e não tem como desfazer.');
+  if (!confirmado) return;
+
+  const token = getToken();
+  if (!token) {
+    alert('Preencha o token de admin acima antes de limpar os logs.');
+    return;
+  }
+
+  const btn = document.getElementById('requests-limpar-btn');
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Limpando…';
+
+  try {
+    const res = await fetch(ENDPOINT_REQUESTS, {
+      method: 'DELETE',
+      headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
+    });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    alert(`${data.removidas} registro(s) com mais de ${data.retencaoDias} dias removido(s).`);
+    await carregarRequests(token);
+  } catch (e) {
+    alert(`Não foi possível limpar os logs (${e.message}).`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = textoOriginal;
+  }
+});
+
 async function carregarRequests(token) {
   try {
     const res = await fetch(`${ENDPOINT_REQUESTS}?limit=${limiteRequests}`, {
