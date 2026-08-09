@@ -288,6 +288,13 @@
   .toolbar-btn:disabled { opacity: 0.5; cursor: default; }
   .toolbar-btn:disabled:hover { background: var(--panel); border-color: var(--border); color: var(--ink); }
 
+  /* Ação destrutiva (remove dados de verdade, sem volta) — cor vermelha
+     só no hover/foco, igual o resto dos botões deste painel: parado,
+     não grita "perigo" o tempo todo; só sinaliza quando alguém está
+     prestes a clicar. */
+  .toolbar-btn-perigo:hover { border-color: var(--red); color: var(--red); }
+  .toolbar-btn-perigo:focus-visible { outline-color: var(--red); }
+
   .carregar-mais-row {
     display: flex;
     justify-content: center;
