@@ -139,12 +139,12 @@
           <div class="stat-label">Status</div>
           <div class="stat-value" id="stat-status-nivel">—</div>
         </div>
-        <div class="stat-card stat-card-com-badge">
+        <div class="stat-card stat-card-com-badge stat-card-clicavel" id="card-erros-hoje" role="button" tabindex="0" aria-haspopup="dialog" aria-label="Ver detalhes dos erros de hoje">
           <div class="stat-label">Erros hoje</div>
           <div class="stat-value red" id="stat-erros-hoje">—</div>
-          <!-- % relativa de erros hoje (errosHoje / ativosHoje) — ver cálculo
-               e classes de severidade (baixo/medio/alto) em atualizarBadgeErrosHoje,
-               script.js. -->
+          <!-- % relativa de erros hoje (erros / total de requests nas
+               últimas 24h) — ver cálculo e classes de severidade
+               (baixo/medio/alto) em atualizarBadgeErrosHoje, script.js. -->
           <span class="stat-pct-badge" id="stat-erros-pct-badge" hidden></span>
         </div>
       </div>
