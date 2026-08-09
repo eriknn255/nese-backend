@@ -897,7 +897,7 @@ function renderLocalizacaoErro(mensagem) {
   ['loc-pais', 'loc-estado', 'loc-municipio'].forEach(id => {
     document.getElementById(id).innerHTML = `<li class="empty-state">${escaparHtml(mensagem)}</li>`;
   });
-  renderMapaDensidadeClientesErro(mensagem);
+  renderMapaDensidadeUsuariosErro(mensagem);
 }
 
 async function carregarLocalizacao(token) {
@@ -911,7 +911,7 @@ async function carregarLocalizacao(token) {
     renderListaLocalizacao('loc-pais', data.porPais, 'pais');
     renderListaLocalizacao('loc-estado', data.porEstado, 'estado');
     renderListaLocalizacao('loc-municipio', data.porMunicipio, 'municipio');
-    renderMapaDensidadeClientes(data.pontosClientes);
+    renderMapaDensidadeUsuarios(data.pontosUsuarios);
   } catch (e) {
     renderLocalizacaoErro(`Erro ao carregar (${e.message}).`);
   }
@@ -1470,7 +1470,7 @@ async function carregarRotasPopulares(token) {
   }
 }
 
-// ---- Mapa de densidade de prestadores (aba Visão geral) ----
+// ---- Mapa de densidade de prestadores (aba Localização) ----
 // Leaflet + leaflet.heat (ambos carregados via CDN no <head>, ver
 // index.html). A instância do mapa é criada uma única vez — Leaflet não
 // gosta de reinicializar em cima do mesmo container — e só reaproveitada
@@ -1509,7 +1509,7 @@ function garantirMapaDensidade() {
 
 function alternarTilesMapa() {
   if (camadaTilesDensidade) camadaTilesDensidade.setUrl(urlTilesParaTema());
-  if (camadaTilesDensidadeClientes) camadaTilesDensidadeClientes.setUrl(urlTilesParaTema());
+  if (camadaTilesDensidadeUsuarios) camadaTilesDensidadeUsuarios.setUrl(urlTilesParaTema());
 }
 
 function renderMapaDensidade(prestadores) {
@@ -1564,58 +1564,60 @@ async function carregarMapaPrestadores(token) {
   }
 }
 
-// ---- Mapa de densidade de CLIENTES (aba Localização) ----
+// ---- Mapa de densidade de USUÁRIOS (aba Visão geral) ----
 // Mesmo padrão exato do mapa de prestadores acima, só que alimentado por
-// log_cadastros.latitude/longitude (ver pontosClientes em
-// GET /dashboard/localizacao, admin.js) em vez de prestadores.lat/lng.
-// Instância PRÓPRIA (variáveis separadas, nomes diferentes) — os dois
-// mapas vivem em abas diferentes ("Visão geral" vs "Localização") e cada
-// um precisa da sua própria instância do Leaflet, mesmo reaproveitando a
-// mesma lógica de tiles/tema/erro.
-let mapaDensidadeClientes = null;
-let camadaHeatDensidadeClientes = null;
-let camadaTilesDensidadeClientes = null;
+// log_cadastros.latitude/longitude (ver pontosUsuarios em
+// GET /dashboard/localizacao, admin.js) em vez de prestadores.lat/lng —
+// ou seja, TODO usuário com localização resolvida, tenha ou não serviço
+// cadastrado (diferente do mapa de prestadores, que só pega quem tem
+// serviço ativo). Instância PRÓPRIA (variáveis separadas, nomes
+// diferentes) — os dois mapas vivem em abas diferentes ("Visão geral" vs
+// "Localização") e cada um precisa da sua própria instância do Leaflet,
+// mesmo reaproveitando a mesma lógica de tiles/tema/erro.
+let mapaDensidadeUsuarios = null;
+let camadaHeatDensidadeUsuarios = null;
+let camadaTilesDensidadeUsuarios = null;
 
-function garantirMapaDensidadeClientes() {
-  if (mapaDensidadeClientes) return mapaDensidadeClientes;
-  const container = document.getElementById('mapa-densidade-clientes');
+function garantirMapaDensidadeUsuarios() {
+  if (mapaDensidadeUsuarios) return mapaDensidadeUsuarios;
+  const container = document.getElementById('mapa-densidade-usuarios');
   container.innerHTML = ''; // remove o "carregando…"/erro antes do Leaflet assumir o container
-  mapaDensidadeClientes = L.map(container, { attributionControl: true, zoomControl: true })
+  mapaDensidadeUsuarios = L.map(container, { attributionControl: true, zoomControl: true })
     .setView([-14.235, -51.9253], 4);
-  camadaTilesDensidadeClientes = L.tileLayer(urlTilesParaTema(), {
+  camadaTilesDensidadeUsuarios = L.tileLayer(urlTilesParaTema(), {
     maxZoom: 18,
     attribution: '&copy; OpenStreetMap &copy; CARTO'
-  }).addTo(mapaDensidadeClientes);
-  return mapaDensidadeClientes;
+  }).addTo(mapaDensidadeUsuarios);
+  return mapaDensidadeUsuarios;
 }
 
-function renderMapaDensidadeClientes(pontos) {
-  const mapa = garantirMapaDensidadeClientes();
+function renderMapaDensidadeUsuarios(pontos) {
+  const mapa = garantirMapaDensidadeUsuarios();
 
-  if (camadaHeatDensidadeClientes) {
-    mapa.removeLayer(camadaHeatDensidadeClientes);
-    camadaHeatDensidadeClientes = null;
+  if (camadaHeatDensidadeUsuarios) {
+    mapa.removeLayer(camadaHeatDensidadeUsuarios);
+    camadaHeatDensidadeUsuarios = null;
   }
 
   if (!pontos || pontos.length === 0) return;
 
   const coordenadas = pontos.map(p => [p.lat, p.lng]);
-  camadaHeatDensidadeClientes = L.heatLayer(coordenadas, { radius: 18, blur: 22, maxZoom: 10 }).addTo(mapa);
+  camadaHeatDensidadeUsuarios = L.heatLayer(coordenadas, { radius: 18, blur: 22, maxZoom: 10 }).addTo(mapa);
 }
 
 // Mesmo raciocínio de renderMapaDensidadeErro (mapa de prestadores, ver
 // comentário lá): só destrói o mapa se ainda não existe um de verdade na
 // tela — uma falha pontual do load() de 30s não deveria apagar o heatmap
 // que já estava carregado.
-function renderMapaDensidadeClientesErro(mensagem) {
-  if (mapaDensidadeClientes) {
-    console.error('Falha ao atualizar mapa de densidade de clientes (mapa existente preservado na tela):', mensagem);
+function renderMapaDensidadeUsuariosErro(mensagem) {
+  if (mapaDensidadeUsuarios) {
+    console.error('Falha ao atualizar mapa de densidade de usuários (mapa existente preservado na tela):', mensagem);
     return;
   }
-  document.getElementById('mapa-densidade-clientes').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
-  mapaDensidadeClientes = null;
-  camadaHeatDensidadeClientes = null;
-  camadaTilesDensidadeClientes = null;
+  document.getElementById('mapa-densidade-usuarios').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
+  mapaDensidadeUsuarios = null;
+  camadaHeatDensidadeUsuarios = null;
+  camadaTilesDensidadeUsuarios = null;
 }
 
 function renderInsightsErro(mensagem) {
@@ -2031,11 +2033,11 @@ function ativarAba(nomeAba) {
   // desalinhados até alguém arrastar ou dar zoom manualmente. Chamado só
   // ao ENTRAR na aba (não a cada load()), senão recalcula sem necessidade
   // a cada 30s com a aba já visível.
-  if (nomeAba === 'visao-geral' && mapaDensidade) {
+  if (nomeAba === 'localizacao' && mapaDensidade) {
     mapaDensidade.invalidateSize();
   }
-  if (nomeAba === 'localizacao' && mapaDensidadeClientes) {
-    mapaDensidadeClientes.invalidateSize();
+  if (nomeAba === 'visao-geral' && mapaDensidadeUsuarios) {
+    mapaDensidadeUsuarios.invalidateSize();
   }
 }
 
