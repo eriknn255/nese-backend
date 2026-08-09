@@ -101,10 +101,46 @@ document.getElementById('token-save-btn').addEventListener('click', () => {
 
 function render(data) {
   document.getElementById('stat-online-agora').textContent = data.stats.onlineAgora;
-  document.getElementById('stat-ativos-hoje').textContent = data.stats.ativosHoje;
-  document.getElementById('stat-ativacoes-mes').textContent = data.stats.ativacoesMes;
-  document.getElementById('stat-total-servicos').textContent = data.stats.totalServicos;
+  // "Ativações de conta/mês" reaproveita o campo ativacoesMes que já existe
+  // no endpoint (só mudou de card/posição e ganhou um rótulo mais claro).
+  document.getElementById('stat-ativacoes-conta-mes').textContent = data.stats.ativacoesMes;
+  // "Exclusões de conta/mês" e "Prestadores do mês (Top 1 serviço mais
+  // procurado)" são métricas NOVAS que o backend ainda não calcula em
+  // GET /dashboard/data — precisam dos campos data.stats.exclusoesMes
+  // (number) e data.stats.prestadoresMesTopServico (string, nome da
+  // categoria) em routes/admin.js. Até lá ficam em "—", igual ao resto do
+  // painel quando falta dado — este dashboard não inventa número.
+  document.getElementById('stat-exclusoes-conta-mes').textContent =
+    data.stats.exclusoesMes != null ? data.stats.exclusoesMes : '—';
+  document.getElementById('stat-prestadores-mes-top-servico').textContent =
+    data.stats.prestadoresMesTopServico != null ? data.stats.prestadoresMesTopServico : '—';
   document.getElementById('stat-erros-hoje').textContent = data.stats.errosHoje;
+  atualizarBadgeErrosHoje(data.stats.errosHoje, data.stats.ativosHoje);
+}
+
+// Badge pequeno no canto do card "Erros hoje": % de erros hoje relativa aos
+// ativos hoje (única outra métrica "hoje" que o endpoint já traz — não há
+// um total de requests do dia nesse payload pra usar como base "de
+// verdade"). Muda de cor por faixa de severidade:
+//   < 2%  -> baixo  (verde)
+//   2–5%  -> médio  (laranja)
+//   > 5%  -> alto   (vermelho)
+// Sem ativosHoje (0 ou ausente) não dá pra calcular proporção -> esconde o
+// badge em vez de mostrar um número sem sentido.
+function atualizarBadgeErrosHoje(errosHoje, ativosHoje) {
+  const badge = document.getElementById('stat-erros-pct-badge');
+  if (!badge) return;
+  if (!ativosHoje || errosHoje == null) {
+    badge.hidden = true;
+    return;
+  }
+  const pct = (errosHoje / ativosHoje) * 100;
+  badge.hidden = false;
+  badge.textContent = `${pct.toFixed(1)}%`;
+  badge.classList.remove('baixo', 'medio', 'alto');
+  if (pct < 2) badge.classList.add('baixo');
+  else if (pct <= 5) badge.classList.add('medio');
+  else badge.classList.add('alto');
 }
 
 // Formata um timestamp (ms) como "há 3 min" / "há 2 h" / "há 5 dias", ou
@@ -2084,9 +2120,11 @@ document.getElementById('sidebar-toggle-btn').addEventListener('click', () => {
 initSidebar();
 
 function renderNoData() {
-  ['stat-online-agora', 'stat-ativos-hoje', 'stat-ativacoes-mes', 'stat-total-servicos', 'stat-erros-hoje'].forEach(id => {
+  ['stat-online-agora', 'stat-ativacoes-conta-mes', 'stat-exclusoes-conta-mes', 'stat-prestadores-mes-top-servico', 'stat-erros-hoje'].forEach(id => {
     document.getElementById(id).textContent = '—';
   });
+  const badge = document.getElementById('stat-erros-pct-badge');
+  if (badge) badge.hidden = true;
 }
 
 async function load() {
