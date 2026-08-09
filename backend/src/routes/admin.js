@@ -73,6 +73,26 @@ const MS_DIA = 24 * MS_HORA;
 // está olhando o painel bater com o do servidor que gravou last_seen_at.
 const MS_ONLINE = 5 * 60 * 1000;
 
+// ==========================================================================
+// O QUE CONTA COMO "ERRO" nas métricas do painel (card "Erros hoje", gráfico
+// "Erros por hora", "erros-por-rota", "rotas-populares" e na detecção de
+// rota com taxa de erro alta que alimenta Alertas). Usado em TODAS essas
+// queries — um lugar só decide a régua, pra nunca ficar uma métrica
+// discordando de outra sobre o que é ou não erro.
+//
+// status_code >= 400, MAS excluindo 401 e 403 de propósito: esses dois são
+// autenticação/autorização REJEITANDO CORRETAMENTE quem não tinha
+// permissão — o servidor fez exatamente o que devia, não é uma falha.
+// Antes disso, um 401 de alguém testando o painel sem token (ou com token
+// vencido) contava igual a um 500 de verdade: como o painel bate em ~12
+// endpoints a cada ciclo de auto-refresh, isso inflava "erros" com volume
+// alto e constante sem sinalizar problema nenhum — foi exatamente o que
+// gerou o pico de "Erros por hora" investigado antes de existir esta
+// constante. 404/422/429/500 etc. continuam contando normalmente: esses
+// sim tendem a indicar algo pra investigar (rota errada, payload
+// inválido, rate limit, bug no servidor).
+const CONDICAO_SQL_ERRO = "status_code >= 400 AND status_code NOT IN (401, 403)";
+
 // GET /api/admin/dashboard/data
 router.get("/dashboard/data", exigirAdmin, (req, res) => {
     const agora = Date.now();
@@ -101,7 +121,7 @@ router.get("/dashboard/data", exigirAdmin, (req, res) => {
     ).get();
 
     const { total: errosHoje } = db.prepare(
-        "SELECT COUNT(*) AS total FROM request_logs WHERE status_code >= 400 AND criado_em >= ?"
+        `SELECT COUNT(*) AS total FROM request_logs WHERE ${CONDICAO_SQL_ERRO} AND criado_em >= ?`
     ).get(inicioHoje);
 
     res.json({
@@ -401,8 +421,9 @@ function lerHoras(req) {
 // hora (tráfego HTTP muda rápido demais pra fazer sentido em "por dia").
 //
 // - requestsPorHora: volume total de requests, últimas N horas.
-// - errosPorHora: mesma janela, só status_code >= 400 — mesma régua de
-//   "erro" usada no card "Erros hoje" (GET /dashboard/data).
+// - errosPorHora: mesma janela, mesma régua de "erro" usada em todo o
+//   resto do painel (ver CONDICAO_SQL_ERRO — exclui 401/403, que são auth
+//   rejeitando certo, não falha).
 // - usuariosAtivosPorHora: COUNT(DISTINCT usuario_id) por hora — é uma
 //   APROXIMAÇÃO de "usuários online por hora", não um snapshot real de
 //   presença: não existe tabela de histórico de online/offline (só
@@ -432,7 +453,7 @@ router.get("/dashboard/graficos/tecnicos", exigirAdmin, (req, res) => {
         SELECT strftime('%Y-%m-%d %H:00', criado_em / 1000, 'unixepoch') AS hora,
                COUNT(*) AS total
         FROM request_logs
-        WHERE criado_em >= ? AND status_code >= 400
+        WHERE criado_em >= ? AND ${CONDICAO_SQL_ERRO}
         GROUP BY hora
     `).all(desde);
 
@@ -509,7 +530,7 @@ router.get("/dashboard/rotas-populares", exigirAdmin, (req, res) => {
             rota,
             COUNT(*) AS totalRequests,
             AVG(duracao_ms) AS duracaoMediaMs,
-            SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS totalErros
+            SUM(CASE WHEN ${CONDICAO_SQL_ERRO} THEN 1 ELSE 0 END) AS totalErros
         FROM request_logs
         WHERE criado_em >= ?
         GROUP BY metodo, rota
@@ -537,9 +558,9 @@ router.get("/dashboard/erros-por-rota", exigirAdmin, (req, res) => {
             metodo,
             rota,
             COUNT(*) AS totalRequests,
-            SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) AS total4xx,
+            SUM(CASE WHEN status_code >= 400 AND status_code < 500 AND status_code NOT IN (401, 403) THEN 1 ELSE 0 END) AS total4xx,
             SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS total5xx,
-            MAX(CASE WHEN status_code >= 400 THEN criado_em END) AS ultimoErroEm
+            MAX(CASE WHEN ${CONDICAO_SQL_ERRO} THEN criado_em END) AS ultimoErroEm
         FROM request_logs
         WHERE criado_em >= ?
         GROUP BY metodo, rota
@@ -1397,7 +1418,7 @@ router.get("/dashboard/alertas", exigirAdmin, (req, res) => {
         SELECT
             metodo, rota,
             COUNT(*) AS totalRequests,
-            SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS totalErros
+            SUM(CASE WHEN ${CONDICAO_SQL_ERRO} THEN 1 ELSE 0 END) AS totalErros
         FROM request_logs
         WHERE criado_em >= ?
         GROUP BY metodo, rota
@@ -1697,6 +1718,14 @@ router.get("/dashboard/seguranca/ips", exigirAdmin, async (req, res) => {
             COUNT(DISTINCT rota) AS rotasDistintas,
             COUNT(DISTINCT user_agent) AS userAgentsDistintos,
             COUNT(DISTINCT usuario_id) AS usuariosDistintos,
+            // Aqui NÃO usa CONDICAO_SQL_ERRO de propósito — diferente das
+            // métricas de "erro do produto" (Erros por hora, erros-por-rota
+            // etc.), onde 401/403 são ruído (auth rejeitando certo). Nesta
+            // aba de Segurança, um IP com muito 401/403 é exatamente o sinal
+            // que queremos pegar: alguém tentando adivinhar o token admin ou
+            // escaneando rotas sem credencial. Excluir aqui faria o painel
+            // parar de detectar o próprio tipo de abuso que esta aba existe
+            // pra flagar.
             SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS totalErros,
             MIN(criado_em) AS primeiraEm,
             MAX(criado_em) AS ultimaEm
