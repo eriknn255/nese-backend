@@ -115,26 +115,30 @@ function render(data) {
   document.getElementById('stat-prestadores-mes-top-servico').textContent =
     data.stats.prestadoresMesTopServico != null ? data.stats.prestadoresMesTopServico : '—';
   document.getElementById('stat-erros-hoje').textContent = data.stats.errosHoje;
-  atualizarBadgeErrosHoje(data.stats.errosHoje, data.stats.ativosHoje);
 }
 
-// Badge pequeno no canto do card "Erros hoje": % de erros hoje relativa aos
-// ativos hoje (única outra métrica "hoje" que o endpoint já traz — não há
-// um total de requests do dia nesse payload pra usar como base "de
-// verdade"). Muda de cor por faixa de severidade:
+// Badge pequeno no canto do card "Erros hoje": % de erros sobre o TOTAL DE
+// REQUESTS (não sobre "ativos hoje" — erro é sempre um subconjunto de
+// request, então essa razão fica naturalmente entre 0% e 100%; usar
+// "ativos hoje" como base estava errado porque um único usuário pode gerar
+// várias requests com erro, então o total de erros facilmente passa do
+// total de contas ativas — foi o que causou o 2960% antes).
+// Base usada: soma de requestsPorHora / errosPorHora das últimas 24h (vem
+// de GET /dashboard/graficos/tecnicos, ver carregarGraficosTecnicosPrincipais)
+// — é "últimas 24h" e não "hoje" no sentido calendário, mas é a única
+// contagem de requests que o backend expõe e mantém a % sempre coerente.
+// Faixas de severidade:
 //   < 2%  -> baixo  (verde)
 //   2–5%  -> médio  (laranja)
 //   > 5%  -> alto   (vermelho)
-// Sem ativosHoje (0 ou ausente) não dá pra calcular proporção -> esconde o
-// badge em vez de mostrar um número sem sentido.
-function atualizarBadgeErrosHoje(errosHoje, ativosHoje) {
+function atualizarBadgeErrosHoje(totalErros24h, totalRequests24h) {
   const badge = document.getElementById('stat-erros-pct-badge');
   if (!badge) return;
-  if (!ativosHoje || errosHoje == null) {
+  if (!totalRequests24h || totalErros24h == null) {
     badge.hidden = true;
     return;
   }
-  const pct = (errosHoje / ativosHoje) * 100;
+  const pct = Math.min((totalErros24h / totalRequests24h) * 100, 100);
   badge.hidden = false;
   badge.textContent = `${pct.toFixed(1)}%`;
   badge.classList.remove('baixo', 'medio', 'alto');
@@ -866,11 +870,17 @@ async function carregarGraficosTecnicosPrincipais(token) {
     renderGraficoErrosPorHora(data.errosPorHora);
     renderGraficoUsuariosAtivosPorHora(data.usuariosAtivosPorHora);
     renderGraficoRequestsPorStatus(data.requestsPorStatusUltimas24h);
+    // % do badge em "Erros hoje" (Visão geral) — ver atualizarBadgeErrosHoje.
+    const totalRequests24h = (data.requestsPorHora || []).reduce((soma, l) => soma + l.total, 0);
+    const totalErros24h = (data.errosPorHora || []).reduce((soma, l) => soma + l.total, 0);
+    atualizarBadgeErrosHoje(totalErros24h, totalRequests24h);
   } catch (e) {
     renderGraficoErro('chart-requests-hora', `Erro ao carregar (${e.message}).`);
     renderGraficoErro('chart-erros-hora', `Erro ao carregar (${e.message}).`);
     renderGraficoErro('chart-usuarios-ativos-hora', `Erro ao carregar (${e.message}).`);
     renderGraficoErro('chart-requests-status', `Erro ao carregar (${e.message}).`);
+    const badge = document.getElementById('stat-erros-pct-badge');
+    if (badge) badge.hidden = true;
   }
 }
 
