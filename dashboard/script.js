@@ -43,56 +43,6 @@ const ENDPOINT_ROTAS_POPULARES = 'https://nese-be.ruexinternet.com/api/admin/das
 // customizada (upload próprio) é que usa caminho relativo.
 const BACKEND_ORIGIN = new URL(ENDPOINT).origin;
 
-// ==========================================================================
-// TIMEOUT PADRÃO PRA TODO FETCH DESTE PAINEL — sem isso, um endpoint
-// lento ou travado (query pesada no servidor, ou algo como
-// /dashboard/seguranca/ips esperando o ip-api.com externo responder)
-// deixa a seção correspondente presa em "carregando…" pra sempre: a
-// Promise do fetch nunca resolve NEM rejeita, então o catch de dentro de
-// cada carregarX() nunca dispara, o renderXErro() correspondente nunca é
-// chamado, e o placeholder inicial do HTML ("carregando…") nunca é
-// substituído — foi exatamente esse mecanismo que deixava "algumas
-// métricas sempre em carregando" no painel.
-//
-// AbortController força a Promise a rejeitar depois de TIMEOUT_FETCH_MS.
-// Essa rejeição cai no catch de cada carregarX() como qualquer outro erro
-// de rede — mesma UI, mesma mensagem de erro (agora com "tempo esgotado"
-// em vez de travar), só que com um teto de espera em vez de infinito.
-// 15s é generoso o bastante pra uma rede ruim/query pesada legítima, sem
-// deixar a pessoa esperando minutos por uma seção que nunca vai responder.
-const TIMEOUT_FETCH_MS = 15000;
-
-// Faz fetch + confere status + faz o parse do JSON, tudo sob o MESMO
-// timeout — de propósito um helper só, não fetch() e res.json() em
-// funções separadas. Numa primeira versão desta correção, o timeout só
-// cobria o fetch() inicial: o AbortController era liberado assim que os
-// CABEÇALHOS chegavam, e o res.json() que vinha depois (lendo o CORPO da
-// resposta) ficava sem proteção nenhuma — se o corpo demorasse ou a
-// conexão travasse no meio do stream (payload grande, rede instável
-// depois do handshake), a seção correspondente do painel voltava a ficar
-// presa em "carregando…" pra sempre, exatamente como antes da primeira
-// tentativa de conserto. Mantendo fetch+json dentro do mesmo try, o
-// mesmo signal cobre a leitura do corpo também — abortar em qualquer
-// ponto do processo rejeita a Promise e cai no catch normal de quem
-// chamou.
-async function buscarJson(url, options = {}) {
-  const controlador = new AbortController();
-  const timeoutId = setTimeout(() => controlador.abort(), TIMEOUT_FETCH_MS);
-  try {
-    const res = await fetch(url, { ...options, signal: controlador.signal });
-    if (res.status === 401) throw new Error('token inválido');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (erro) {
-    if (erro.name === 'AbortError') {
-      throw new Error(`tempo esgotado após ${TIMEOUT_FETCH_MS / 1000}s`);
-    }
-    throw erro;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
 function resolverAvatarUrl(avatarEfetivo) {
   if (!avatarEfetivo) return null;
   // Já é absoluta (foto do Google) — usa como veio.
@@ -338,9 +288,12 @@ document.getElementById('usuarios-busca').addEventListener('input', aplicarFiltr
 
 async function carregarUsuarios(token) {
   try {
-    const data = await buscarJson(ENDPOINT_USUARIOS, {
+    const res = await fetch(ENDPOINT_USUARIOS, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     usuariosListaCompleta = data.usuarios || [];
     aplicarFiltroUsuarios();
   } catch (e) {
@@ -438,10 +391,13 @@ document.getElementById('requests-limpar-btn').addEventListener('click', async (
   btn.textContent = 'Limpando…';
 
   try {
-    const data = await buscarJson(ENDPOINT_REQUESTS, {
+    const res = await fetch(ENDPOINT_REQUESTS, {
       method: 'DELETE',
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     alert(`${data.removidas} registro(s) com mais de ${data.retencaoDias} dias removido(s).`);
     await carregarRequests(token);
   } catch (e) {
@@ -454,9 +410,12 @@ document.getElementById('requests-limpar-btn').addEventListener('click', async (
 
 async function carregarRequests(token) {
   try {
-    const data = await buscarJson(`${ENDPOINT_REQUESTS}?limit=${limiteRequests}`, {
+    const res = await fetch(`${ENDPOINT_REQUESTS}?limit=${limiteRequests}`, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     requestsListaCompleta = data.requests || [];
     requestsTemMais = !!data.temMais;
     requestsCarregarMaisBtn.hidden = !requestsTemMais;
@@ -534,9 +493,12 @@ document.getElementById('logs-cadastro-exportar-btn').addEventListener('click', 
 
 async function carregarLogsCadastro(token) {
   try {
-    const data = await buscarJson(`${ENDPOINT_LOGS_CADASTRO}?limit=${limiteLogsCadastro}`, {
+    const res = await fetch(`${ENDPOINT_LOGS_CADASTRO}?limit=${limiteLogsCadastro}`, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     logsCadastroListaCompleta = data.logs || [];
     logsCadastroCarregarMaisBtn.hidden = !data.temMais;
     aplicarFiltroLogsCadastro();
@@ -858,9 +820,12 @@ function renderErrosPorRota(porRota) {
 
 async function carregarGraficosTecnicosPrincipais(token) {
   try {
-    const data = await buscarJson(ENDPOINT_GRAFICOS_TECNICOS, {
+    const res = await fetch(ENDPOINT_GRAFICOS_TECNICOS, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderGraficoRequestsPorHora(data.requestsPorHora);
     renderGraficoErrosPorHora(data.errosPorHora);
     renderGraficoUsuariosAtivosPorHora(data.usuariosAtivosPorHora);
@@ -875,9 +840,12 @@ async function carregarGraficosTecnicosPrincipais(token) {
 
 async function carregarErrosPorRota(token) {
   try {
-    const data = await buscarJson(ENDPOINT_ERROS_POR_ROTA, {
+    const res = await fetch(ENDPOINT_ERROS_POR_ROTA, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderErrosPorRota(data.porRota);
   } catch (e) {
     document.getElementById('erros-por-rota-tbody').innerHTML = `<tr><td colspan="5" class="empty-state">Erro ao carregar (${e.message}).</td></tr>`;
@@ -896,9 +864,12 @@ async function carregarGraficosTecnicos(token) {
 
 async function carregarGraficosComercial(token) {
   try {
-    const data = await buscarJson(`${ENDPOINT_GRAFICOS_COMERCIAL}?dias=${diasCadastros}`, {
+    const res = await fetch(`${ENDPOINT_GRAFICOS_COMERCIAL}?dias=${diasCadastros}`, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderGraficoCadastrosPorDia(data.cadastrosPorDia);
     renderGraficoCadastrosPorHora(data.cadastrosPorHora);
     renderGraficoCategorias(data.prestadoresPorCategoria);
@@ -930,9 +901,12 @@ function renderLocalizacaoErro(mensagem) {
 
 async function carregarLocalizacao(token) {
   try {
-    const data = await buscarJson(ENDPOINT_LOCALIZACAO, {
+    const res = await fetch(ENDPOINT_LOCALIZACAO, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderListaLocalizacao('loc-pais', data.porPais, 'pais');
     renderListaLocalizacao('loc-estado', data.porEstado, 'estado');
     renderListaLocalizacao('loc-municipio', data.porMunicipio, 'municipio');
@@ -1036,9 +1010,12 @@ async function abrirDetalhesUsuario(usuarioId) {
   }
 
   try {
-    const data = await buscarJson(ENDPOINT_USUARIO_DETALHE_BASE + encodeURIComponent(usuarioId), {
+    const res = await fetch(ENDPOINT_USUARIO_DETALHE_BASE + encodeURIComponent(usuarioId), {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderModal(data);
   } catch (e) {
     const mensagem = e.message === 'HTTP 404' ? 'usuário não encontrado' : e.message;
@@ -1074,7 +1051,10 @@ function renderTabelaRetencao(coortes) {
 
 async function carregarRetencao(token) {
   try {
-    const data = await buscarJson(ENDPOINT_RETENCAO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_RETENCAO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderTabelaRetencao(data.coortes);
   } catch (e) {
     document.getElementById('tabela-retencao').innerHTML = `<div class="empty-state">Erro ao carregar (${e.message}).</div>`;
@@ -1099,7 +1079,10 @@ function renderFunil(data) {
 
 async function carregarFunil(token) {
   try {
-    const data = await buscarJson(ENDPOINT_FUNIL, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_FUNIL, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderFunil(data);
   } catch (e) {
     ['funil-servico-pct', 'funil-avaliacao-pct', 'funil-salvo-pct'].forEach(id => document.getElementById(id).textContent = '—');
@@ -1126,7 +1109,10 @@ function renderContasMortas(data) {
 
 async function carregarContasMortas(token) {
   try {
-    const data = await buscarJson(ENDPOINT_CONTAS_MORTAS, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_CONTAS_MORTAS, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderContasMortas(data);
   } catch (e) {
     document.getElementById('stat-contas-mortas-total').textContent = '—';
@@ -1154,7 +1140,10 @@ function renderNotaPorCategoria(linhas) {
 
 async function carregarAvaliacoesInsights(token) {
   try {
-    const data = await buscarJson(ENDPOINT_AVALIACOES_INSIGHTS, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_AVALIACOES_INSIGHTS, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     document.getElementById('stat-expiracao-automatica').textContent = formatarPercentual(data.expiracaoAutomatica.percentualExpiradaAutomaticamente);
     renderNotaPorCategoria(data.notaMediaPorCategoria);
     document.getElementById('stat-decisao-aprovacao').textContent = `${formatarPercentual(data.decisoes.percentualAprovacao)} (${data.decisoes.totalPublicadas})`;
@@ -1207,7 +1196,10 @@ function renderWhatsappPorCategoria(linhas) {
 
 async function carregarWhatsapp(token) {
   try {
-    const data = await buscarJson(ENDPOINT_WHATSAPP, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_WHATSAPP, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderWhatsappPorPrestador(data.porPrestador);
     renderWhatsappPorCategoria(data.porCategoria);
   } catch (e) {
@@ -1233,7 +1225,10 @@ function renderCobertura(data) {
 
 async function carregarCobertura(token) {
   try {
-    const data = await buscarJson(ENDPOINT_COBERTURA, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_COBERTURA, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderCobertura(data);
   } catch (e) {
     document.getElementById('cobertura-tbody').innerHTML = `<tr><td colspan="3" class="empty-state">Erro ao carregar (${e.message}).</td></tr>`;
@@ -1273,7 +1268,10 @@ function renderBuscasSemResultadoErro(mensagem) {
 
 async function carregarBuscasSemResultado(token) {
   try {
-    const data = await buscarJson(ENDPOINT_BUSCAS_SEM_RESULTADO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_BUSCAS_SEM_RESULTADO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderBuscasSemResultado(data);
   } catch (e) {
     renderBuscasSemResultadoErro(`Erro ao carregar (${e.message}).`);
@@ -1317,7 +1315,10 @@ function renderDemandaNaoAtendidaErro(mensagem) {
 
 async function carregarDemandaNaoAtendida(token) {
   try {
-    const data = await buscarJson(ENDPOINT_DEMANDA_NAO_ATENDIDA, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_DEMANDA_NAO_ATENDIDA, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderDemandaNaoAtendida(data.oportunidades);
   } catch (e) {
     renderDemandaNaoAtendidaErro(`Erro ao carregar (${e.message}).`);
@@ -1354,7 +1355,10 @@ function renderModeracaoErro(mensagem) {
 
 async function carregarModeracao(token) {
   try {
-    const data = await buscarJson(ENDPOINT_MODERACAO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_MODERACAO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderModeracao(data);
   } catch (e) {
     renderModeracaoErro(`Erro ao carregar (${e.message}).`);
@@ -1381,7 +1385,10 @@ function renderChurnErro(mensagem) {
 
 async function carregarChurn(token) {
   try {
-    const data = await buscarJson(ENDPOINT_CHURN, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_CHURN, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderChurn(data);
   } catch (e) {
     renderChurnErro(`Erro ao carregar (${e.message}).`);
@@ -1417,7 +1424,10 @@ function renderPrestadoresIncompletosErro(mensagem) {
 
 async function carregarPrestadoresIncompletos(token) {
   try {
-    const data = await buscarJson(ENDPOINT_PRESTADORES_INCOMPLETOS, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_PRESTADORES_INCOMPLETOS, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderPrestadoresIncompletos(data);
   } catch (e) {
     renderPrestadoresIncompletosErro(`Erro ao carregar (${e.message}).`);
@@ -1448,7 +1458,10 @@ function renderRotasPopularesErro(mensagem) {
 
 async function carregarRotasPopulares(token) {
   try {
-    const data = await buscarJson(ENDPOINT_ROTAS_POPULARES, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_ROTAS_POPULARES, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderRotasPopulares(data.porRota);
   } catch (e) {
     renderRotasPopularesErro(`Erro ao carregar (${e.message}).`);
@@ -1523,17 +1536,22 @@ function renderMapaDensidade(prestadores) {
 // deixar o heatmap com dado um ciclo desatualizado na tela do que fazer o
 // mapa inteiro sumir e resetar zoom/posição a cada soluço de rede. Essa
 // troca foi o que causava o "mapa some de repente".
+// Container sobrescrito por innerHTML (mensagem de erro/"sem token")
+// invalida a instância do Leaflet que estava montada nele — força
+// recriar o mapa do zero na próxima chamada bem-sucedida.
 function renderMapaDensidadeErro(mensagem) {
-  if (mapaDensidade) {
-    console.warn('Falha ao atualizar o mapa de densidade — mantendo o último estado carregado com sucesso:', mensagem);
-    return;
-  }
   document.getElementById('mapa-densidade-prestadores').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
+  mapaDensidade = null;
+  camadaHeatDensidade = null;
+  camadaTilesDensidade = null;
 }
 
 async function carregarMapaPrestadores(token) {
   try {
-    const data = await buscarJson(ENDPOINT_MAPA_PRESTADORES, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(ENDPOINT_MAPA_PRESTADORES, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderMapaDensidade(data.prestadores);
   } catch (e) {
     renderMapaDensidadeErro(`Erro ao carregar (${e.message}).`);
@@ -1607,9 +1625,12 @@ function renderAlertasErro(mensagem) {
 
 async function carregarAlertas(token) {
   try {
-    const data = await buscarJson(ENDPOINT_ALERTAS, {
+    const res = await fetch(ENDPOINT_ALERTAS, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderAlertas(data.alertas);
   } catch (e) {
     renderAlertasErro(`Erro ao carregar alertas (${e.message}).`);
@@ -1742,9 +1763,12 @@ function renderStatusErro(mensagem) {
 
 async function carregarStatus(token) {
   try {
-    const data = await buscarJson(ENDPOINT_STATUS, {
+    const res = await fetch(ENDPOINT_STATUS, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderStatus(data);
   } catch (e) {
     renderStatusErro(`Erro ao carregar status (${e.message}).`);
@@ -1843,9 +1867,12 @@ function obterJanelaSeguranca() {
 async function carregarSeguranca(token) {
   try {
     const minutos = obterJanelaSeguranca();
-    const data = await buscarJson(`${ENDPOINT_SEGURANCA_IPS}?minutos=${encodeURIComponent(minutos)}`, {
+    const res = await fetch(`${ENDPOINT_SEGURANCA_IPS}?minutos=${encodeURIComponent(minutos)}`, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     renderSeguranca(data);
   } catch (e) {
     renderSegurancaErro(`Erro ao carregar segurança (${e.message}).`);
@@ -1936,16 +1963,6 @@ function ativarAba(nomeAba) {
   if (nomeAba === 'graficos-tecnico' || nomeAba === 'graficos-comercial') {
     redimensionarGraficosArea();
   }
-
-  // Mesmo problema, mesma causa: o Leaflet do mapa de densidade também
-  // pode ter sido criado (ou só existido) enquanto "Visão geral" estava
-  // com hidden — Leaflet calcula o tamanho do container na hora da
-  // criação, e um container hidden mede 0x0. invalidateSize() força ele a
-  // remedir agora que a aba está visível de novo; sem isso o mapa aparece
-  // cortado/cinza até alguém redimensionar a janela por acaso.
-  if (nomeAba === 'visao-geral' && mapaDensidade) {
-    setTimeout(() => mapaDensidade.invalidateSize(), 0);
-  }
 }
 
 document.querySelectorAll('.sidebar-link[data-aba]').forEach(btn => {
@@ -2029,9 +2046,12 @@ async function load() {
   // dado que continuava bom. Separado assim, uma falha aqui afeta só os
   // 5 cards do topo.
   try {
-    const data = await buscarJson(ENDPOINT, {
+    const res = await fetch(ENDPOINT, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
     render(data);
     errorBanner.style.display = 'none';
   } catch (e) {
