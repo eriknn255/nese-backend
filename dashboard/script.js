@@ -897,6 +897,7 @@ function renderLocalizacaoErro(mensagem) {
   ['loc-pais', 'loc-estado', 'loc-municipio'].forEach(id => {
     document.getElementById(id).innerHTML = `<li class="empty-state">${escaparHtml(mensagem)}</li>`;
   });
+  renderMapaDensidadeClientesErro(mensagem);
 }
 
 async function carregarLocalizacao(token) {
@@ -910,6 +911,7 @@ async function carregarLocalizacao(token) {
     renderListaLocalizacao('loc-pais', data.porPais, 'pais');
     renderListaLocalizacao('loc-estado', data.porEstado, 'estado');
     renderListaLocalizacao('loc-municipio', data.porMunicipio, 'municipio');
+    renderMapaDensidadeClientes(data.pontosClientes);
   } catch (e) {
     renderLocalizacaoErro(`Erro ao carregar (${e.message}).`);
   }
@@ -1506,8 +1508,8 @@ function garantirMapaDensidade() {
 }
 
 function alternarTilesMapa() {
-  if (!camadaTilesDensidade) return;
-  camadaTilesDensidade.setUrl(urlTilesParaTema());
+  if (camadaTilesDensidade) camadaTilesDensidade.setUrl(urlTilesParaTema());
+  if (camadaTilesDensidadeClientes) camadaTilesDensidadeClientes.setUrl(urlTilesParaTema());
 }
 
 function renderMapaDensidade(prestadores) {
@@ -1560,6 +1562,60 @@ async function carregarMapaPrestadores(token) {
   } catch (e) {
     renderMapaDensidadeErro(`Erro ao carregar (${e.message}).`);
   }
+}
+
+// ---- Mapa de densidade de CLIENTES (aba Localização) ----
+// Mesmo padrão exato do mapa de prestadores acima, só que alimentado por
+// log_cadastros.latitude/longitude (ver pontosClientes em
+// GET /dashboard/localizacao, admin.js) em vez de prestadores.lat/lng.
+// Instância PRÓPRIA (variáveis separadas, nomes diferentes) — os dois
+// mapas vivem em abas diferentes ("Visão geral" vs "Localização") e cada
+// um precisa da sua própria instância do Leaflet, mesmo reaproveitando a
+// mesma lógica de tiles/tema/erro.
+let mapaDensidadeClientes = null;
+let camadaHeatDensidadeClientes = null;
+let camadaTilesDensidadeClientes = null;
+
+function garantirMapaDensidadeClientes() {
+  if (mapaDensidadeClientes) return mapaDensidadeClientes;
+  const container = document.getElementById('mapa-densidade-clientes');
+  container.innerHTML = ''; // remove o "carregando…"/erro antes do Leaflet assumir o container
+  mapaDensidadeClientes = L.map(container, { attributionControl: true, zoomControl: true })
+    .setView([-14.235, -51.9253], 4);
+  camadaTilesDensidadeClientes = L.tileLayer(urlTilesParaTema(), {
+    maxZoom: 18,
+    attribution: '&copy; OpenStreetMap &copy; CARTO'
+  }).addTo(mapaDensidadeClientes);
+  return mapaDensidadeClientes;
+}
+
+function renderMapaDensidadeClientes(pontos) {
+  const mapa = garantirMapaDensidadeClientes();
+
+  if (camadaHeatDensidadeClientes) {
+    mapa.removeLayer(camadaHeatDensidadeClientes);
+    camadaHeatDensidadeClientes = null;
+  }
+
+  if (!pontos || pontos.length === 0) return;
+
+  const coordenadas = pontos.map(p => [p.lat, p.lng]);
+  camadaHeatDensidadeClientes = L.heatLayer(coordenadas, { radius: 18, blur: 22, maxZoom: 10 }).addTo(mapa);
+}
+
+// Mesmo raciocínio de renderMapaDensidadeErro (mapa de prestadores, ver
+// comentário lá): só destrói o mapa se ainda não existe um de verdade na
+// tela — uma falha pontual do load() de 30s não deveria apagar o heatmap
+// que já estava carregado.
+function renderMapaDensidadeClientesErro(mensagem) {
+  if (mapaDensidadeClientes) {
+    console.error('Falha ao atualizar mapa de densidade de clientes (mapa existente preservado na tela):', mensagem);
+    return;
+  }
+  document.getElementById('mapa-densidade-clientes').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
+  mapaDensidadeClientes = null;
+  camadaHeatDensidadeClientes = null;
+  camadaTilesDensidadeClientes = null;
 }
 
 function renderInsightsErro(mensagem) {
@@ -1969,14 +2025,17 @@ function ativarAba(nomeAba) {
   }
 
   // Mesmo problema do Chart.js acima, só que no Leaflet: se o mapa foi
-  // criado (ou o heatmap foi atualizado) enquanto a aba "Visão geral"
-  // estava com `hidden`, o container era 0x0 no momento em que o Leaflet
-  // calculou o tamanho — sem invalidateSize() ele fica com tiles faltando/
+  // criado (ou o heatmap foi atualizado) enquanto a aba estava com
+  // `hidden`, o container era 0x0 no momento em que o Leaflet calculou o
+  // tamanho — sem invalidateSize() ele fica com tiles faltando/
   // desalinhados até alguém arrastar ou dar zoom manualmente. Chamado só
   // ao ENTRAR na aba (não a cada load()), senão recalcula sem necessidade
   // a cada 30s com a aba já visível.
   if (nomeAba === 'visao-geral' && mapaDensidade) {
     mapaDensidade.invalidateSize();
+  }
+  if (nomeAba === 'localizacao' && mapaDensidadeClientes) {
+    mapaDensidadeClientes.invalidateSize();
   }
 }
 
