@@ -639,6 +639,48 @@ router.get("/dashboard/erros-por-rota", exigirAdmin, (req, res) => {
 });
 
 // ==========================================================================
+// GET /api/admin/dashboard/erros-hoje?limit=N
+// Lista crua das requests com erro de HOJE (últimas 24h) — alimenta o
+// modal que abre ao clicar no card "Erros hoje" da Visão geral. De
+// propósito usa a MESMA condição (CONDICAO_SQL_ERRO) e a MESMA janela
+// (agora - MS_DIA) que o card usa pra contar `errosHoje` em
+// GET /dashboard/data — é o requisito do card: abrir "todos e somente" os
+// erros que compõem aquele número, nem um a mais (ex: um erro de ontem)
+// nem um a menos (ex: 401/403 que CONDICAO_SQL_ERRO já exclui em toda
+// métrica de erro do painel).
+// Diferente de /dashboard/erros-por-rota (que agrupa por rota, últimas
+// 24h fixas por padrão MAS aceita ?horas= arbitrário): aqui é lista
+// individual, uma linha por request, sem agregação — o modal mostra cada
+// ocorrência (rota, status, quando, de qual usuário/IP), não um resumo.
+// temMais: mesma heurística de /dashboard/requests (linhas.length ===
+// limite), mas aqui dá pra confirmar com certeza via `total` (COUNT(*)
+// exato) porque a janela é fixa, não corre risco de custo alto como um
+// COUNT(*) sem filtro de tempo correria.
+// ==========================================================================
+const LIMITE_ERROS_HOJE_PADRAO = 100;
+const LIMITE_ERROS_HOJE_MAXIMO = 2000;
+
+router.get("/dashboard/erros-hoje", exigirAdmin, (req, res) => {
+    const limite = lerLimite(req, LIMITE_ERROS_HOJE_PADRAO, LIMITE_ERROS_HOJE_MAXIMO);
+    const desde = Date.now() - MS_DIA;
+
+    const linhas = db.prepare(`
+        SELECT metodo, rota, status_code AS statusCode, duracao_ms AS duracaoMs,
+               usuario_id AS usuarioId, ip, porta, criado_em AS criadoEm
+        FROM request_logs
+        WHERE ${CONDICAO_SQL_ERRO} AND criado_em >= ?
+        ORDER BY criado_em DESC
+        LIMIT ?
+    `).all(desde, limite);
+
+    const { total } = db.prepare(
+        `SELECT COUNT(*) AS total FROM request_logs WHERE ${CONDICAO_SQL_ERRO} AND criado_em >= ?`
+    ).get(desde);
+
+    res.json({ erros: linhas, total, temMais: linhas.length < total });
+});
+
+// ==========================================================================
 // GET /api/admin/dashboard/graficos/comercial?dias=N
 // Aba "Gráficos comerciais" — crescimento de conta, mix de contas e
 // catálogo de serviços. Nada aqui depende de request_logs (isso é
