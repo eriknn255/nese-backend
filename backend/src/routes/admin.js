@@ -1718,14 +1718,14 @@ router.get("/dashboard/seguranca/ips", exigirAdmin, async (req, res) => {
             COUNT(DISTINCT rota) AS rotasDistintas,
             COUNT(DISTINCT user_agent) AS userAgentsDistintos,
             COUNT(DISTINCT usuario_id) AS usuariosDistintos,
-            // Aqui NÃO usa CONDICAO_SQL_ERRO de propósito — diferente das
-            // métricas de "erro do produto" (Erros por hora, erros-por-rota
-            // etc.), onde 401/403 são ruído (auth rejeitando certo). Nesta
-            // aba de Segurança, um IP com muito 401/403 é exatamente o sinal
-            // que queremos pegar: alguém tentando adivinhar o token admin ou
-            // escaneando rotas sem credencial. Excluir aqui faria o painel
-            // parar de detectar o próprio tipo de abuso que esta aba existe
-            // pra flagar.
+            -- Aqui NÃO usa CONDICAO_SQL_ERRO de propósito — diferente das
+             métricas de "erro do produto" (Erros por hora, erros-por-rota
+             etc.), onde 401/403 são ruído (auth rejeitando certo). Nesta
+             aba de Segurança, um IP com muito 401/403 é exatamente o sinal
+             que queremos pegar: alguém tentando adivinhar o token admin ou
+             escaneando rotas sem credencial. Excluir aqui faria o painel
+             parar de detectar o próprio tipo de abuso que esta aba existe
+             pra flagar.--
             SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS totalErros,
             MIN(criado_em) AS primeiraEm,
             MAX(criado_em) AS ultimaEm
