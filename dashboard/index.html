@@ -42,22 +42,22 @@
     <button type="button" class="sidebar-link active" data-aba="visao-geral" title="Visão geral">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Visão geral</span>
     </button>
+    <button type="button" class="sidebar-link" data-aba="status" title="Status">
+      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Status</span>
+    </button>
     <button type="button" class="sidebar-link" data-aba="alertas" title="Alertas">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Alertas</span>
       <span class="sidebar-badge" id="sidebar-badge-alertas" hidden>0</span>
     </button>
-    <button type="button" class="sidebar-link" data-aba="status" title="Status">
-      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Status</span>
-    </button>
-    <button type="button" class="sidebar-link sidebar-link-tecnico" data-aba="seguranca" title="Segurança">
-      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Segurança</span>
+    <button type="button" class="sidebar-link" data-aba="requests" title="Requests">
+      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Requests</span>
       <span class="sidebar-badge" id="sidebar-badge-seguranca" hidden>0</span>
     </button>
     <button type="button" class="sidebar-link" data-aba="usuarios" title="Usuários">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Usuários</span>
     </button>
-    <button type="button" class="sidebar-link" data-aba="localizacao" title="Localização">
-      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Localização</span>
+    <button type="button" class="sidebar-link" data-aba="oferta-demanda" title="Oferta &amp; Demanda">
+      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Oferta &amp; Demanda</span>
     </button>
     <button type="button" class="sidebar-link sidebar-link-tecnico" data-aba="graficos-tecnico" title="Gráficos técnicos">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Gráficos técnicos</span>
@@ -68,14 +68,14 @@
     <button type="button" class="sidebar-link sidebar-link-tecnico" data-aba="logs-cadastro" title="Logs de cadastro">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Logs de cadastro</span>
     </button>
-    <button type="button" class="sidebar-link" data-aba="requests" title="Requests">
-      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Requests</span>
-    </button>
     <button type="button" class="sidebar-link" data-aba="retencao" title="Retenção &amp; Ativação">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Retenção &amp; Ativação</span>
     </button>
     <button type="button" class="sidebar-link" data-aba="avaliacoes" title="Avaliações">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Avaliações</span>
+    </button>
+    <button type="button" class="sidebar-link sidebar-link-tecnico" data-aba="seguranca" title="Segurança">
+      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Segurança</span>
     </button>
     <div class="sidebar-spacer"></div>
     <button id="theme-btn" type="button" class="sidebar-theme-btn" aria-label="Alternar tema claro/escuro" title="Alternar tema">
@@ -153,20 +153,6 @@
       <div class="chart-card">
         <div id="mapa-densidade-usuarios"><div class="empty-state">carregando…</div></div>
       </div>
-    </section>
-
-    <!-- ==================== ABA: ALERTAS ==================== -->
-    <!-- Não é uma métrica nova — é uma síntese de sinais que já existem
-         espalhados nas outras abas (erros por rota, contas inativas,
-         demanda não atendida, geocoding acumulado), filtrados só pro que
-         cruzou um limiar de atenção AGORA (ver GET /dashboard/alertas em
-         routes/admin.js). -->
-    <section class="aba-conteudo" id="aba-alertas" hidden>
-      <div class="section-title section-title-com-acoes">
-        <span>Alertas <span class="section-note">(sinais técnicos que cruzaram um limiar de atenção — não é uma lista de tudo que existe)</span></span>
-        <button type="button" id="alertas-limpar-btn" class="toolbar-btn">Limpar</button>
-      </div>
-      <div class="alertas-lista" id="alertas-lista"><div class="empty-state">carregando…</div></div>
     </section>
 
     <!-- ==================== ABA: STATUS ==================== -->
@@ -254,11 +240,56 @@
       </div>
     </section>
 
-    <!-- ==================== ABA: SEGURANÇA ==================== -->
-    <!-- Quantidade e densidade de requests por IP numa janela recente —
-         não afirma "isto é um ataque", só destaca o que foge do padrão
-         (ver GET /dashboard/seguranca/ips em routes/admin.js). -->
-    <section class="aba-conteudo" id="aba-seguranca" hidden>
+    <!-- ==================== ABA: ALERTAS ==================== -->
+    <!-- Não é uma métrica nova — é uma síntese de sinais que já existem
+         espalhados nas outras abas (erros por rota, contas inativas,
+         demanda não atendida, geocoding acumulado), filtrados só pro que
+         cruzou um limiar de atenção AGORA (ver GET /dashboard/alertas em
+         routes/admin.js). -->
+    <section class="aba-conteudo" id="aba-alertas" hidden>
+      <div class="section-title section-title-com-acoes">
+        <span>Alertas <span class="section-note">(sinais técnicos que cruzaram um limiar de atenção — não é uma lista de tudo que existe)</span></span>
+        <button type="button" id="alertas-limpar-btn" class="toolbar-btn">Limpar</button>
+      </div>
+      <div class="alertas-lista" id="alertas-lista"><div class="empty-state">carregando…</div></div>
+    </section>
+
+    <!-- ==================== ABA: REQUESTS ==================== -->
+    <!-- "Requests recentes" continua exatamente como já estava, no topo.
+         Abaixo dela vêm os itens que antes viviam na aba "Segurança"
+         (densidade de requests por IP — ver GET /dashboard/seguranca/ips
+         em routes/admin.js), na mesma ordem de prioridade que tinham lá.
+         A aba "Segurança" continua existindo (agora ao final da barra
+         lateral), só que sem itens por enquanto — ver comentário lá. -->
+    <section class="aba-conteudo" id="aba-requests" hidden>
+      <div class="section-title">Requests recentes <span class="section-note">(rota, status, IP, porta — todo o tráfego HTTP)</span></div>
+      <div class="table-toolbar">
+        <input type="search" id="requests-busca" class="table-busca" placeholder="Buscar por rota, método, status ou IP…">
+        <button type="button" id="requests-exportar-btn" class="toolbar-btn">Exportar CSV</button>
+        <button type="button" id="requests-limpar-btn" class="toolbar-btn toolbar-btn-perigo" title="Remove da tabela todo request_log com mais de 90 dias (mesma janela do job automático)">Limpar logs antigos</button>
+      </div>
+      <div class="requests-panel" id="requests-panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Rota</th>
+              <th>Método</th>
+              <th>Status</th>
+              <th>Duração</th>
+              <th>IP</th>
+              <th>Porta</th>
+              <th>Quando</th>
+            </tr>
+          </thead>
+          <tbody id="requests-tbody">
+            <tr><td colspan="7" class="empty-state">carregando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="carregar-mais-row">
+        <button type="button" id="requests-carregar-mais-btn" class="toolbar-btn" hidden>Carregar mais</button>
+      </div>
+
       <div class="section-title">Segurança <span class="section-note">(volume e densidade de requests por IP — sinaliza padrões de DDoS/varredura, não confirma um ataque)</span></div>
 
       <div class="table-toolbar">
@@ -320,27 +351,29 @@
       </table>
     </section>
 
-    <!-- ==================== ABA: LOCALIZAÇÃO ==================== -->
-    <section class="aba-conteudo" id="aba-localizacao" hidden>
-      <div class="section-title">Localização <span class="section-note">(cadastros com localização resolvida — depende de permissão de GPS/localização concedida no navegador de quem se cadastrou)</span></div>
+    <!-- ==================== ABA: OFERTA & DEMANDA ==================== -->
+    <!-- Antes "Localização" — misturava geografia de usuário e de
+         prestador com sinais de negócio (buscas sem resultado, gap de
+         cobertura) numa aba só, sem uma pergunta clara. Reorganizada em
+         torno de UMA pergunta: "onde tem oferta e onde tem demanda sem
+         atender?". As listas País/Estado/Cidade saíram (eram só de
+         usuário, redundantes com Cobertura por município, que já compara
+         usuário x prestador). O mapa de densidade de USUÁRIOS continua em
+         "Visão geral" — aqui os dois mapas são os dois lados dessa
+         pergunta: oferta (prestadores) e o sintoma mais forte de demanda
+         sem atender (buscas sem resultado), lado a lado pra comparação
+         visual direta. -->
+    <section class="aba-conteudo" id="aba-oferta-demanda" hidden>
+      <div class="section-title">Oferta &amp; Demanda <span class="section-note">(onde tem serviço oferecido e onde a demanda esbarrou em nada — comparados lado a lado)</span></div>
 
-      <div class="section-title">Densidade de prestadores <span class="section-note">(só prestadores com serviço cadastrado e localização geocodificada)</span></div>
-      <div class="chart-card">
-        <div id="mapa-densidade-prestadores"><div class="empty-state">carregando…</div></div>
-      </div>
-
-      <div class="loc-row">
-        <div class="loc-card">
-          <div class="loc-card-title">País</div>
-          <ul class="loc-list" id="loc-pais"><li class="empty-state">carregando…</li></ul>
+      <div class="mapas-lado-a-lado">
+        <div class="chart-card">
+          <div class="mapa-subtitulo">Densidade de prestadores <span class="section-note">(só prestadores com serviço cadastrado e localização geocodificada)</span></div>
+          <div id="mapa-densidade-prestadores"><div class="empty-state">carregando…</div></div>
         </div>
-        <div class="loc-card">
-          <div class="loc-card-title">Estado</div>
-          <ul class="loc-list" id="loc-estado"><li class="empty-state">carregando…</li></ul>
-        </div>
-        <div class="loc-card">
-          <div class="loc-card-title">Cidade</div>
-          <ul class="loc-list" id="loc-municipio"><li class="empty-state">carregando…</li></ul>
+        <div class="chart-card">
+          <div class="mapa-subtitulo">Densidade de buscas sem resultado <span class="section-note">(toda busca que não achou ninguém, geolocalizada no momento da busca)</span></div>
+          <div id="mapa-densidade-buscas"><div class="empty-state">carregando…</div></div>
         </div>
       </div>
 
@@ -358,35 +391,10 @@
         </tbody>
       </table>
 
-      <div class="section-title">Buscas sem resultado por categoria <span class="section-note">(visão geral — quantas buscas cada categoria acumula sem achar ninguém)</span></div>
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-label">Total de buscas sem resultado</div>
-          <div class="stat-value red" id="stat-buscas-sem-resultado-total">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Aguardando geocoding</div>
-          <div class="stat-value" id="stat-buscas-sem-resultado-pendentes">—</div>
-        </div>
-      </div>
+      <div class="section-title">Demanda não atendida por município <span class="section-note">(barra = buscas sem resultado no município; linha = quantas categorias diferentes têm gap de oferta E busca confirmando — passe o mouse pro detalhe por nível)</span></div>
       <div class="chart-card">
-        <div class="bar-chart bar-chart-horizontal" id="chart-buscas-sem-resultado-categoria"><div class="empty-state">carregando…</div></div>
+        <div class="area-chart" id="chart-demanda-municipio"><div class="empty-state">carregando…</div></div>
       </div>
-
-      <div class="section-title">Demanda não atendida por categoria + município <span class="section-note">("confirmada" = tem gap de oferta E gente buscou; "observada" = só busca sem resultado; "inferida" = só o gap teórico, ninguém buscou ainda)</span></div>
-      <table>
-        <thead>
-          <tr>
-            <th>Categoria</th>
-            <th>Município</th>
-            <th>Nível</th>
-            <th>Buscas sem resultado</th>
-          </tr>
-        </thead>
-        <tbody id="demanda-nao-atendida-tbody">
-          <tr><td colspan="4" class="empty-state">carregando…</td></tr>
-        </tbody>
-      </table>
     </section>
 
     <!-- ==================== ABA: GRÁFICOS TÉCNICOS ==================== -->
@@ -556,37 +564,6 @@
       </div>
     </section>
 
-    <!-- ==================== ABA: REQUESTS ==================== -->
-    <section class="aba-conteudo" id="aba-requests" hidden>
-      <div class="section-title">Requests recentes <span class="section-note">(rota, status, IP, porta — todo o tráfego HTTP)</span></div>
-      <div class="table-toolbar">
-        <input type="search" id="requests-busca" class="table-busca" placeholder="Buscar por rota, método, status ou IP…">
-        <button type="button" id="requests-exportar-btn" class="toolbar-btn">Exportar CSV</button>
-        <button type="button" id="requests-limpar-btn" class="toolbar-btn toolbar-btn-perigo" title="Remove da tabela todo request_log com mais de 90 dias (mesma janela do job automático)">Limpar logs antigos</button>
-      </div>
-      <div class="requests-panel" id="requests-panel">
-        <table>
-          <thead>
-            <tr>
-              <th>Rota</th>
-              <th>Método</th>
-              <th>Status</th>
-              <th>Duração</th>
-              <th>IP</th>
-              <th>Porta</th>
-              <th>Quando</th>
-            </tr>
-          </thead>
-          <tbody id="requests-tbody">
-            <tr><td colspan="7" class="empty-state">carregando…</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="carregar-mais-row">
-        <button type="button" id="requests-carregar-mais-btn" class="toolbar-btn" hidden>Carregar mais</button>
-      </div>
-    </section>
-
     <!-- ==================== ABA: RETENÇÃO & ATIVAÇÃO ==================== -->
     <section class="aba-conteudo" id="aba-retencao" hidden>
 
@@ -716,6 +693,16 @@
         <div class="bar-chart bar-chart-horizontal" id="chart-nota-categoria"><div class="empty-state">carregando…</div></div>
       </div>
 
+    </section>
+
+    <!-- ==================== ABA: SEGURANÇA ==================== -->
+    <!-- Temporariamente sem itens — o conteúdo que vivia aqui (densidade
+         de requests por IP) foi movido pra aba "Requests" (ver comentário
+         lá). Esta aba continua existindo, agora ao final da barra
+         lateral, à espera de um próximo conjunto de métricas próprias. -->
+    <section class="aba-conteudo" id="aba-seguranca" hidden>
+      <div class="section-title">Segurança</div>
+      <div class="empty-state">Nenhum item nesta aba por enquanto.</div>
     </section>
 
   </div>
