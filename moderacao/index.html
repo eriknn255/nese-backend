@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nese — Moderação</title>
+<link rel="stylesheet" href="/dashboard/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/google-sans-flex/wght.css">
+<link rel="icon" type="image/png" href="/dashboard/img/logo-nese.png">
+</head>
+<body>
+
+<!-- ==========================================================================
+     MODERAÇÃO — página separada do dashboard de métricas (index.html), que
+     é só leitura. Aqui é edição/exclusão IRRESTRITA de usuários e
+     prestadores (ver PATCH/DELETE /api/admin/moderacao/* em admin.js) —
+     mesmo ADMIN_TOKEN do dashboard, reaproveitado do mesmo localStorage
+     (ver TOKEN_KEY em moderacao.js, tem que bater com o de script.js).
+     Base inicial ("o grosso"): listar + editar campos + excluir, em
+     usuários e prestadores. Sem paginação de servidor, sem log de quem
+     mudou o quê — ver comentário equivalente em admin.js.
+     ========================================================================== -->
+<div class="app-shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-logo-row">
+      <span class="sidebar-title-full">Moderação</span>
+      <img src="/dashboard/img/logo-nese.webp" alt="Nese" class="sidebar-logo-icon" width="28" height="28">
+    </div>
+
+    <button type="button" class="sidebar-link active" data-aba="usuarios" title="Usuários">
+      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Usuários</span>
+    </button>
+    <button type="button" class="sidebar-link" data-aba="prestadores" title="Prestadores">
+      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Prestadores</span>
+    </button>
+
+    <div class="sidebar-spacer"></div>
+    <a href="/dashboard/" id="dashboard-link-btn" class="sidebar-theme-btn" title="Voltar pro dashboard">
+      <span>📊</span><span class="sidebar-link-label">Dashboard</span>
+    </a>
+    <button id="theme-btn" type="button" class="sidebar-theme-btn" aria-label="Alternar tema claro/escuro" title="Alternar tema">
+      <span id="theme-icon">🌙</span><span id="theme-label" class="sidebar-link-label">Escuro</span>
+    </button>
+  </nav>
+
+  <div class="main-area">
+
+    <header>
+      <h1 id="aba-titulo">Usuários</h1>
+      <div class="header-right">
+        <div class="meta"><span class="status-dot"></span><span id="last-update">carregando…</span></div>
+      </div>
+    </header>
+
+    <div class="error-banner" id="error-banner"></div>
+
+    <div class="token-row" id="token-row">
+      <label for="admin-token">Token de admin</label>
+      <input type="password" id="admin-token" placeholder="X-Admin-Token" autocomplete="off">
+      <label class="remember-label">
+        <input type="checkbox" id="remember-token"> Lembrar neste navegador
+      </label>
+      <button id="token-save-btn" type="button">Salvar</button>
+    </div>
+
+    <!-- ==================== ABA: USUÁRIOS ==================== -->
+    <section class="aba-conteudo" id="aba-usuarios">
+      <div class="section-title">Usuários <span class="section-note">(acesso total — clique numa linha pra editar ou excluir a conta)</span></div>
+      <div class="table-toolbar">
+        <input type="search" id="usuarios-busca" class="table-busca" placeholder="Buscar por nome, e-mail ou ID…">
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Usuário</th>
+            <th>ID</th>
+            <th>Telefone</th>
+            <th>CPF/CNPJ</th>
+            <th>Serviços</th>
+            <th>Criado em</th>
+          </tr>
+        </thead>
+        <tbody id="usuarios-tbody">
+          <tr><td colspan="6" class="empty-state">carregando…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ==================== ABA: PRESTADORES ==================== -->
+    <section class="aba-conteudo" id="aba-prestadores" hidden>
+      <div class="section-title">Prestadores <span class="section-note">(acesso total — clique numa linha pra editar ou excluir o serviço)</span></div>
+      <div class="table-toolbar">
+        <input type="search" id="prestadores-busca" class="table-busca" placeholder="Buscar por nome do dono, e-mail ou categoria…">
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Prestador (dono)</th>
+            <th>Categoria</th>
+            <th>Telefone</th>
+            <th>ID</th>
+            <th>Criado em</th>
+          </tr>
+        </thead>
+        <tbody id="prestadores-tbody">
+          <tr><td colspan="5" class="empty-state">carregando…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+  </div>
+</div>
+
+<!-- ==========================================================================
+     MODAL DE EDIÇÃO — reaproveitado pra usuário e prestador (ver
+     abrirEdicaoUsuario/abrirEdicaoPrestador em moderacao.js); o conteúdo
+     do form muda conforme o que foi aberto.
+     ========================================================================== -->
+<div class="modal-overlay" id="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-titulo">
+    <div class="modal-header">
+      <h2 id="modal-titulo">Editar</h2>
+      <button type="button" id="modal-close-btn" class="modal-close" aria-label="Fechar">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body">
+      <div class="empty-state">carregando…</div>
+    </div>
+  </div>
+</div>
+
+<script src="moderacao.js"></script>
+</body>
+</html>
