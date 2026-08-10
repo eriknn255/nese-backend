@@ -161,7 +161,7 @@ db.exec(`
         municipio TEXT,
         estado TEXT,
         pais TEXT,
-        usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+        usuario_id TEXT REFERENCES usuarios(id) ON DELETE SET NULL,
         criado_em INTEGER NOT NULL
     )
 `);
