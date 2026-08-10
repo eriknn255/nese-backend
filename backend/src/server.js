@@ -61,10 +61,25 @@ app.use(registrarPresenca);  // grava last_seen_at (throttled) — ver middlewar
 // deliberada). Fica ANTES do express.static de propósito: senão a resposta
 // de um arquivo estático nunca passaria por aqui.
 //
+// IMPORTANTE — usa req.originalUrl (cortando a query string), NUNCA
+// req.path aqui: req.path fica RELATIVO ao sub-router que respondeu (ex:
+// dentro de app.use("/api/admin", rotasAdmin), um GET /api/admin/dashboard/
+// status vira só "/dashboard/status" em req.path) e o Express só restaura
+// req.url/req.path pro valor completo se aquele sub-router chamar next()
+// de volta pra fora — não quando ele mesmo responde a request (o caso
+// normal: rota bateu, res.json() foi chamado, fim). Como este log roda no
+// evento "finish" (depois da resposta já ter sido enviada, ver comentário
+// abaixo), qualquer leitura de req.path aqui pega o valor já mutado — e
+// era exatamente por isso que /dashboard/status, /dashboard/alertas etc.
+// apareciam SEM o prefixo /api/admin na tabela "Requests recentes" e
+// batiam como "fora do escopo do app" em classificarRotaSuspeita (que
+// espera o path completo). req.originalUrl nunca é reescrito pelo router,
+// não importa quantos níveis de app.use() a request atravessou — é a
+// única fonte confiável de "qual era o caminho de verdade".
+//
 // req.route só existe depois que um Router bate a rota (não existe pra
-// arquivo estático nem pra 404) — por isso usamos req.path sempre, nunca
-// req.route.path: um único formato de "rota" pra toda linha da tabela, sem
-// caso especial.
+// arquivo estático nem pra 404) — por isso não usamos req.route.path: um
+// único formato de "rota" pra toda linha da tabela, sem caso especial.
 //
 // Não bloqueia nem atrasa a resposta: o INSERT roda no evento "finish" (a
 // resposta já foi enviada ao cliente antes do log gravar), e falha de log
@@ -75,13 +90,18 @@ function logRequisicao(req, res, next) {
 
     res.on("finish", () => {
         const duracaoMs = Number(process.hrtime.bigint() - inicio) / 1e6;
+        // Corta a query string (?minutos=60 etc.) — sem isso, cada
+        // combinação de parâmetros vira uma "rota" distinta nos
+        // agrupamentos (rotas-populares, erros-por-rota, classificação de
+        // acesso indevido), o que não é o que essas telas querem mostrar.
+        const caminho = req.originalUrl.split("?")[0];
         try {
             db.prepare(`
                 INSERT INTO request_logs (metodo, rota, status_code, duracao_ms, usuario_id, ip, porta, user_agent, criado_em)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
                 req.method,
-                req.path,
+                caminho,
                 res.statusCode,
                 Math.round(duracaoMs),
                 req.usuario ? req.usuario.id : null,
