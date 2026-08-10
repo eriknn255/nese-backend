@@ -1196,12 +1196,13 @@ function renderFunil(data) {
   document.getElementById('funil-servico-pct').textContent = formatarPercentual(data.primeiroServico.percentual);
   document.getElementById('funil-avaliacao-pct').textContent = formatarPercentual(data.primeiraAvaliacao.percentual);
   document.getElementById('funil-salvo-pct').textContent = formatarPercentual(data.primeiroSalvo.percentual);
+  document.getElementById('funil-whatsapp-pct').textContent = formatarPercentual(data.primeiroCliqueWhatsapp.percentual);
 
   function tempoTexto(etapa) {
     return etapa.tempoMedioDias != null ? `${etapa.tempoMedioDias.toFixed(1)} dia(s) em média até a primeira vez` : 'sem dados de tempo ainda';
   }
   document.getElementById('funil-detalhe').textContent =
-    `Serviço: ${tempoTexto(data.primeiroServico)} · Avaliação: ${tempoTexto(data.primeiraAvaliacao)} · Salvo: ${tempoTexto(data.primeiroSalvo)}`;
+    `Serviço: ${tempoTexto(data.primeiroServico)} · Avaliação: ${tempoTexto(data.primeiraAvaliacao)} · Salvo: ${tempoTexto(data.primeiroSalvo)} · Clique WhatsApp: ${tempoTexto(data.primeiroCliqueWhatsapp)}`;
 }
 
 async function carregarFunil(token) {
@@ -1212,7 +1213,7 @@ async function carregarFunil(token) {
     const data = await res.json();
     renderFunil(data);
   } catch (e) {
-    ['funil-servico-pct', 'funil-avaliacao-pct', 'funil-salvo-pct'].forEach(id => document.getElementById(id).textContent = '—');
+    ['funil-servico-pct', 'funil-avaliacao-pct', 'funil-salvo-pct', 'funil-whatsapp-pct'].forEach(id => document.getElementById(id).textContent = '—');
     document.getElementById('funil-detalhe').textContent = `Erro ao carregar (${e.message}).`;
   }
 }
@@ -1790,7 +1791,7 @@ async function carregarMapaBuscasSemResultado(token) {
 
 function renderInsightsErro(mensagem) {
   document.getElementById('tabela-retencao').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
-  ['funil-servico-pct', 'funil-avaliacao-pct', 'funil-salvo-pct'].forEach(id => document.getElementById(id).textContent = '—');
+  ['funil-servico-pct', 'funil-avaliacao-pct', 'funil-salvo-pct', 'funil-whatsapp-pct'].forEach(id => document.getElementById(id).textContent = '—');
   document.getElementById('funil-detalhe').textContent = mensagem;
   document.getElementById('stat-contas-mortas-total').textContent = '—';
   document.getElementById('contas-mortas-tbody').innerHTML = `<tr><td colspan="4" class="empty-state">${escaparHtml(mensagem)}</td></tr>`;
