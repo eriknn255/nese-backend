@@ -93,6 +93,80 @@ const MS_ONLINE = 5 * 60 * 1000;
 // inválido, rate limit, bug no servidor).
 const CONDICAO_SQL_ERRO = "status_code >= 400 AND status_code NOT IN (401, 403)";
 
+// ==========================================================================
+// O QUE CONTA COMO "FORA DO ESCOPO DO APP" numa rota — tentativa de acesso
+// a arquivo interno (.env, .git, chaves SSH) ou a caminho que este app
+// nunca serviu (painel de outra stack, extensão de outra linguagem) e
+// caminho genuinamente inexistente (não bate em nenhum router nem em
+// arquivo de storage de verdade). Usado em /dashboard/requests (sinaliza
+// linha a linha), /dashboard/seguranca/ips (mais um sinal por IP, somado
+// aos já existentes) e /dashboard/acessos-indevidos (visão agregada por
+// rota) — um classificador só, pros três concordarem sobre o que é ou não
+// suspeito, mesmo raciocínio de CONDICAO_SQL_ERRO acima.
+//
+// Dois jeitos de uma rota ser LEGÍTIMA (tudo o resto é sinalizado):
+//
+// 1. Bate em algum PREFIXO_ROTA_LEGITIMO — os únicos caminhos que este
+//    servidor de fato expõe de propósito (ver app.use(...) em server.js).
+//    Não importa o status code batido (200, 404 de um :id que não existe,
+//    500 etc.) — a ROTA em si é uma chamada que o app faz de propósito.
+//
+// 2. Começa com um segmento em formato UUID v4 — fotos/vídeos são
+//    servidos direto da raiz de storage/<id>/... (ver server.js e "PASTA
+//    POR PRESTADOR/USUÁRIO" em routes/prestadores.js e usuarios.js), sem
+//    prefixo /api, e <id> é sempre o uuid.v4() gerado no cadastro. Uma
+//    rota nesse formato é, por construção, uma tentativa de pegar um
+//    arquivo de verdade — mesmo que ELE especificamente já tenha sido
+//    apagado (404 legítimo, não varredura).
+//
+// Tudo que não bate em nenhum dos dois É sinalizado, com um motivo
+// específico quando a rota casa uma assinatura conhecida de varredura
+// (.php/.env/.git/wp-admin/etc.) — motivo genérico ("fora do escopo do
+// app") pro resto, que é a maioria: bots tentando caminhos aleatórios que
+// não têm assinatura reconhecível nenhuma, só não existem mesmo.
+// ==========================================================================
+const PREFIXOS_ROTA_LEGITIMOS = [
+    "/api/usuarios", "/api/prestadores", "/api/avaliacoes",
+    "/api/notificacoes", "/api/admin", "/api/buscas", "/api/saude"
+];
+
+const REGEX_UUID_INICIO = /^\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\/|$)/i;
+
+// Caminhos que praticamente todo navegador ou crawler pede sozinho, sem
+// nenhuma intenção por trás (favicon da aba, robots.txt de SEO, ícone de
+// "adicionar à tela inicial" no iOS, desafios de domínio em /.well-known/
+// — ex: Apple App Site Association, validação Let's Encrypt). Nenhum
+// disso é uma tentativa de ataque; sinalizar geraria só ruído de fundo
+// constante que atrapalha achar o que de fato importa.
+const REGEX_CAMINHO_BENIGNO_UNIVERSAL = /^\/(favicon\.ico|robots\.txt|apple-touch-icon(-precomposed)?\.png|\.well-known\/.*)$/i;
+
+// Assinaturas que NUNCA aparecem numa chamada de verdade deste app:
+// extensão/stack que este Express nunca serve (PHP, ASP.NET, JSP, CGI),
+// arquivo de configuração/segredo (.env, .git, id_rsa, .aws, .ssh),
+// painel administrativo de outro software (wp-admin, phpmyadmin,
+// actuator), ou tentativa de directory traversal ("../").
+const REGEX_ASSINATURA_MALICIOSA = /\.(php\d?|aspx?|jsp|cgi)(\?|$)|\.env(\.|$|\?)|\/\.git(\/|$)|wp-(admin|login|content|includes|json)|phpmyadmin|xmlrpc\.php|\.ssh\/|id_rsa|\.aws\/|\.htaccess|\.htpasswd|actuator|\/vendor\/|server-status|\/cgi-bin\/|\.(sql|bak|zip|tar|gz)$|\.\.(\/|%2f)/i;
+
+function classificarRotaSuspeita(rota) {
+    if (!rota) return null;
+
+    if (REGEX_CAMINHO_BENIGNO_UNIVERSAL.test(rota)) return null;
+
+    if (REGEX_ASSINATURA_MALICIOSA.test(rota)) {
+        return "arquivo interno / assinatura de varredura";
+    }
+
+    const rotaLower = rota.toLowerCase();
+    const ehPrefixoLegitimo = PREFIXOS_ROTA_LEGITIMOS.some(
+        p => rotaLower === p || rotaLower.startsWith(p + "/") || rotaLower.startsWith(p + "?")
+    );
+    if (ehPrefixoLegitimo) return null;
+
+    if (REGEX_UUID_INICIO.test(rota)) return null; // arquivo de storage de verdade
+
+    return "fora do escopo do app";
+}
+
 // GET /api/admin/dashboard/data
 router.get("/dashboard/data", exigirAdmin, (req, res) => {
     const agora = Date.now();
@@ -355,11 +429,20 @@ router.get("/dashboard/requests", exigirAdmin, (req, res) => {
         LIMIT ?
     `).all(limite);
 
+    // suspeita/motivoSuspeita: ver classificarRotaSuspeita, acima — mesma
+    // régua usada em /dashboard/seguranca/ips e /dashboard/acessos-indevidos,
+    // aplicada aqui linha a linha pra sinalizar direto na tabela "Requests
+    // recentes" quais requests especificamente dispararam o sinal.
+    const requests = linhas.map(l => {
+        const motivoSuspeita = classificarRotaSuspeita(l.rota);
+        return { ...l, suspeita: motivoSuspeita !== null, motivoSuspeita };
+    });
+
     // temMais: heurística barata — se voltou exatamente o limite pedido,
     // provavelmente existe mais além dele (só teria certeza com um COUNT(*)
     // à parte, caro de rodar em toda request só pra isso). Usada pelo
     // front só pra decidir se mostra o botão "Carregar mais".
-    res.json({ requests: linhas, temMais: linhas.length === limite });
+    res.json({ requests, temMais: linhas.length === limite });
 });
 
 // ==========================================================================
@@ -1850,6 +1933,13 @@ const REQUESTS_MINUTO_SUSPEITO = 20;
 const TAXA_ERRO_SUSPEITA_PCT = 50;
 const VOLUME_MINIMO_TAXA_ERRO_IP = 10;
 const ROTAS_DISTINTAS_SUSPEITAS = 15;
+// Bem mais baixo que os outros limiares de propósito: diferente de
+// volume/taxa de erro/rotas distintas (que podem ter explicação inocente
+// em volume alto — um app cliente com bug batendo muito numa rota, por
+// exemplo), UM ÚNICO acesso a /.env já não tem explicação inocente
+// nenhuma. 3 é só uma margem pequena pra não sinalizar por um clique
+// perdido de alguém testando URL errada manualmente.
+const ACESSOS_FORA_DO_ESCOPO_SUSPEITO = 3;
 
 router.get("/dashboard/seguranca/ips", exigirAdmin, async (req, res) => {
     const minutos = lerMinutos(req);
@@ -1880,6 +1970,21 @@ router.get("/dashboard/seguranca/ips", exigirAdmin, async (req, res) => {
         LIMIT ?
     `).all(desde, limite);
 
+    // Acessos fora do escopo do app (ver classificarRotaSuspeita, acima)
+    // por IP, na MESMA janela — não dá pra fazer isso só com SQL (o
+    // classificador usa regex/prefixo em JS), então é uma segunda query,
+    // mais crua (só ip+rota, sem agregação), classificada e contada aqui.
+    // Só entre os IPs que já apareceram no ranking acima — não faz sentido
+    // gastar essa contagem com um IP que nem entrou no top da página.
+    const rotasPorIp = db.prepare(`
+        SELECT ip, rota FROM request_logs WHERE ip IS NOT NULL AND criado_em >= ?
+    `).all(desde);
+    const acessosForaDoEscopoPorIp = new Map();
+    for (const { ip, rota } of rotasPorIp) {
+        if (classificarRotaSuspeita(rota) === null) continue;
+        acessosForaDoEscopoPorIp.set(ip, (acessosForaDoEscopoPorIp.get(ip) || 0) + 1);
+    }
+
     const ipsDaPagina = linhas.map(l => l.ip);
     let localizacoes = new Map();
     try {
@@ -1897,6 +2002,7 @@ router.get("/dashboard/seguranca/ips", exigirAdmin, async (req, res) => {
         const taxaErroPct = l.totalRequests > 0
             ? Math.round((l.totalErros / l.totalRequests) * 1000) / 10
             : 0;
+        const acessosForaDoEscopo = acessosForaDoEscopoPorIp.get(l.ip) || 0;
 
         const motivos = [];
         if (requestsPorMinuto >= REQUESTS_MINUTO_SUSPEITO) {
@@ -1907,6 +2013,9 @@ router.get("/dashboard/seguranca/ips", exigirAdmin, async (req, res) => {
         }
         if (l.rotasDistintas >= ROTAS_DISTINTAS_SUSPEITAS) {
             motivos.push(`${l.rotasDistintas} rotas distintas`);
+        }
+        if (acessosForaDoEscopo >= ACESSOS_FORA_DO_ESCOPO_SUSPEITO) {
+            motivos.push(`${acessosForaDoEscopo} acesso(s) fora do escopo do app`);
         }
 
         const localizacao = localizacoes.get(l.ip) || null;
@@ -1920,6 +2029,7 @@ router.get("/dashboard/seguranca/ips", exigirAdmin, async (req, res) => {
             usuariosDistintos: l.usuariosDistintos,
             totalErros: l.totalErros,
             taxaErroPct,
+            acessosForaDoEscopo,
             primeiraEm: l.primeiraEm,
             ultimaEm: l.ultimaEm,
             suspeito: motivos.length > 0,
@@ -1962,6 +2072,68 @@ router.get("/dashboard/seguranca/ips", exigirAdmin, async (req, res) => {
         porRegiao,
         minutos,
         totalSuspeitos: ips.filter(i => i.suspeito).length
+    });
+});
+
+// ==========================================================================
+// GET /api/admin/dashboard/acessos-indevidos?minutos=N&limit=N
+// Área própria pra "acesso fora do escopo do app" (ver classificarRotaSuspeita,
+// acima) — diferente de /dashboard/seguranca/ips (que soma isso como só
+// mais um motivo dentre vários, por IP), aqui a pergunta é "quais
+// CAMINHOS estão sendo tentados", agrupado por rota: qual caminho mais
+// bateram, quantos IPs distintos tentaram o mesmo caminho (um único IP
+// insistindo é diferente de vários IPs tentando o mesmo — pode indicar
+// uma lista de varredura compartilhada/replicada) e quando foi a última
+// vez. mesma janela (?minutos=) e mesmo classificador de
+// /dashboard/seguranca/ips — os dois sempre concordam sobre o que é ou
+// não um acesso indevido, só cortam o dado em eixos diferentes (por IP x
+// por rota).
+// ==========================================================================
+const LIMITE_ACESSOS_INDEVIDOS_PADRAO = 30;
+const LIMITE_ACESSOS_INDEVIDOS_MAXIMO = 100;
+
+router.get("/dashboard/acessos-indevidos", exigirAdmin, (req, res) => {
+    const minutos = lerMinutos(req);
+    const limite = lerLimite(req, LIMITE_ACESSOS_INDEVIDOS_PADRAO, LIMITE_ACESSOS_INDEVIDOS_MAXIMO);
+    const desde = Date.now() - minutos * 60 * 1000;
+
+    const linhas = db.prepare(`
+        SELECT rota, ip, criado_em AS criadoEm FROM request_logs WHERE criado_em >= ?
+    `).all(desde);
+
+    const porRotaMap = new Map();
+    let totalGeral = 0;
+    const ipsUnicos = new Set();
+
+    for (const { rota, ip, criadoEm } of linhas) {
+        const motivo = classificarRotaSuspeita(rota);
+        if (motivo === null) continue;
+
+        totalGeral += 1;
+        if (ip) ipsUnicos.add(ip);
+
+        let acc = porRotaMap.get(rota);
+        if (!acc) {
+            acc = { rota, motivo, total: 0, ips: new Set(), ultimaEm: criadoEm };
+            porRotaMap.set(rota, acc);
+        }
+        acc.total += 1;
+        if (ip) acc.ips.add(ip);
+        if (criadoEm > acc.ultimaEm) acc.ultimaEm = criadoEm;
+    }
+
+    const porRota = [...porRotaMap.values()]
+        .map(({ rota, motivo, total, ips, ultimaEm }) => ({
+            rota, motivo, total, ipsDistintos: ips.size, ultimaEm
+        }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, limite);
+
+    res.json({
+        totalGeral,
+        ipsDistintosGeral: ipsUnicos.size,
+        minutos,
+        porRota
     });
 });
 
