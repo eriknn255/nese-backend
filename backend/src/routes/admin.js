@@ -107,9 +107,10 @@ const CONDICAO_SQL_ERRO = "status_code >= 400 AND status_code NOT IN (401, 403)"
 // Dois jeitos de uma rota ser LEGÍTIMA (tudo o resto é sinalizado):
 //
 // 1. Bate em algum PREFIXO_ROTA_LEGITIMO — os únicos caminhos que este
-//    servidor de fato expõe de propósito (ver app.use(...) em server.js).
-//    Não importa o status code batido (200, 404 de um :id que não existe,
-//    500 etc.) — a ROTA em si é uma chamada que o app faz de propósito.
+//    servidor de fato expõe de propósito PRO APP (ver app.use(...) em
+//    server.js). Não importa o status code batido (200, 404 de um :id
+//    que não existe, 500 etc.) — a ROTA em si é uma chamada que o app faz
+//    de propósito.
 //
 // 2. Começa com um segmento em formato UUID v4 — fotos/vídeos são
 //    servidos direto da raiz de storage/<id>/... (ver server.js e "PASTA
@@ -119,16 +120,33 @@ const CONDICAO_SQL_ERRO = "status_code >= 400 AND status_code NOT IN (401, 403)"
 //    arquivo de verdade — mesmo que ELE especificamente já tenha sido
 //    apagado (404 legítimo, não varredura).
 //
-// Tudo que não bate em nenhum dos dois É sinalizado, com um motivo
-// específico quando a rota casa uma assinatura conhecida de varredura
-// (.php/.env/.git/wp-admin/etc.) — motivo genérico ("fora do escopo do
-// app") pro resto, que é a maioria: bots tentando caminhos aleatórios que
-// não têm assinatura reconhecível nenhuma, só não existem mesmo.
+// /api/admin FICA DE FORA dessa lista de propósito — a dashboard não é o
+// app (ver comentário no topo do arquivo: painel interno, só o Erik
+// acessa, protegido por ADMIN_TOKEN fixo, nem passa por identidade.js).
+// Tratá-la como "escopo do app" era exatamente o problema: qualquer
+// tentativa de acesso a /api/admin/* SEM o token certo é, por definição,
+// alguém que não é o Erik tentando o painel — isso É um sinal de
+// segurança, não deveria ser engolido pela lista de rotas legítimas do
+// app. Em vez de entrar no critério de escopo, /api/admin tem critério
+// próprio, à parte, mais adiante em classificarRotaSuspeita: o token
+// bateu (o painel de verdade sendo usado) ou não bateu (tentativa de
+// invasão do painel) — nunca "a rota existe, então tá tudo bem".
+//
+// Tudo que não bate em nenhum dos dois (nem no critério próprio do
+// admin, abaixo) É sinalizado, com um motivo específico quando a rota
+// casa uma assinatura conhecida de varredura (.php/.env/.git/wp-admin/
+// etc.) — motivo genérico ("fora do escopo do app") pro resto, que é a
+// maioria: bots tentando caminhos aleatórios que não têm assinatura
+// reconhecível nenhuma, só não existem mesmo.
 // ==========================================================================
 const PREFIXOS_ROTA_LEGITIMOS = [
     "/api/usuarios", "/api/prestadores", "/api/avaliacoes",
-    "/api/notificacoes", "/api/admin", "/api/buscas", "/api/saude"
+    "/api/notificacoes", "/api/buscas", "/api/saude"
 ];
+
+// Prefixo do próprio painel — julgado à parte (ver comentário acima), não
+// pela lista de PREFIXOS_ROTA_LEGITIMOS.
+const PREFIXO_ROTA_ADMIN = "/api/admin";
 
 const REGEX_UUID_INICIO = /^\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\/|$)/i;
 
@@ -147,7 +165,12 @@ const REGEX_CAMINHO_BENIGNO_UNIVERSAL = /^\/(favicon\.ico|robots\.txt|apple-touc
 // actuator), ou tentativa de directory traversal ("../").
 const REGEX_ASSINATURA_MALICIOSA = /\.(php\d?|aspx?|jsp|cgi)(\?|$)|\.env(\.|$|\?)|\/\.git(\/|$)|wp-(admin|login|content|includes|json)|phpmyadmin|xmlrpc\.php|\.ssh\/|id_rsa|\.aws\/|\.htaccess|\.htpasswd|actuator|\/vendor\/|server-status|\/cgi-bin\/|\.(sql|bak|zip|tar|gz)$|\.\.(\/|%2f)/i;
 
-function classificarRotaSuspeita(rota) {
+// statusCode é opcional só pelos chamadores que não tenham essa coluna à
+// mão (nenhum tem mais, ver os três SELECTs que alimentam isto — todos
+// passaram a trazer status_code); sem ele, uma rota /api/admin cai no
+// caso "sem informação de status" tratado como sinalizado mais abaixo,
+// por segurança (não dá pra assumir token válido sem saber o status).
+function classificarRotaSuspeita(rota, statusCode) {
     if (!rota) return null;
 
     if (REGEX_CAMINHO_BENIGNO_UNIVERSAL.test(rota)) return null;
@@ -157,6 +180,20 @@ function classificarRotaSuspeita(rota) {
     }
 
     const rotaLower = rota.toLowerCase();
+
+    // Painel admin: critério é o TOKEN, não o escopo (ver comentário
+    // grande acima de PREFIXOS_ROTA_LEGITIMOS). 401 = exigirAdmin
+    // rejeitou o X-Admin-Token (ausente ou errado) → sinalizado, é
+    // alguém tentando o painel sem ser o Erik. Qualquer outro status
+    // (200, 404 de um :id, 500 etc.) → o token bateu, é o painel de
+    // verdade sendo usado, não sinalizado.
+    const ehRotaAdmin = rotaLower === PREFIXO_ROTA_ADMIN ||
+        rotaLower.startsWith(PREFIXO_ROTA_ADMIN + "/") ||
+        rotaLower.startsWith(PREFIXO_ROTA_ADMIN + "?");
+    if (ehRotaAdmin) {
+        return statusCode === 401 ? "token de admin inválido" : null;
+    }
+
     const ehPrefixoLegitimo = PREFIXOS_ROTA_LEGITIMOS.some(
         p => rotaLower === p || rotaLower.startsWith(p + "/") || rotaLower.startsWith(p + "?")
     );
@@ -434,7 +471,7 @@ router.get("/dashboard/requests", exigirAdmin, (req, res) => {
     // aplicada aqui linha a linha pra sinalizar direto na tabela "Requests
     // recentes" quais requests especificamente dispararam o sinal.
     const requests = linhas.map(l => {
-        const motivoSuspeita = classificarRotaSuspeita(l.rota);
+        const motivoSuspeita = classificarRotaSuspeita(l.rota, l.statusCode);
         return { ...l, suspeita: motivoSuspeita !== null, motivoSuspeita };
     });
 
@@ -1990,11 +2027,11 @@ router.get("/dashboard/seguranca/ips", exigirAdmin, async (req, res) => {
     // Só entre os IPs que já apareceram no ranking acima — não faz sentido
     // gastar essa contagem com um IP que nem entrou no top da página.
     const rotasPorIp = db.prepare(`
-        SELECT ip, rota FROM request_logs WHERE ip IS NOT NULL AND criado_em >= ?
+        SELECT ip, rota, status_code AS statusCode FROM request_logs WHERE ip IS NOT NULL AND criado_em >= ?
     `).all(desde);
     const acessosForaDoEscopoPorIp = new Map();
-    for (const { ip, rota } of rotasPorIp) {
-        if (classificarRotaSuspeita(rota) === null) continue;
+    for (const { ip, rota, statusCode } of rotasPorIp) {
+        if (classificarRotaSuspeita(rota, statusCode) === null) continue;
         acessosForaDoEscopoPorIp.set(ip, (acessosForaDoEscopoPorIp.get(ip) || 0) + 1);
     }
 
@@ -2111,15 +2148,15 @@ router.get("/dashboard/acessos-indevidos", exigirAdmin, (req, res) => {
     const desde = Date.now() - minutos * 60 * 1000;
 
     const linhas = db.prepare(`
-        SELECT rota, ip, criado_em AS criadoEm FROM request_logs WHERE criado_em >= ?
+        SELECT rota, ip, status_code AS statusCode, criado_em AS criadoEm FROM request_logs WHERE criado_em >= ?
     `).all(desde);
 
     const porRotaMap = new Map();
     let totalGeral = 0;
     const ipsUnicos = new Set();
 
-    for (const { rota, ip, criadoEm } of linhas) {
-        const motivo = classificarRotaSuspeita(rota);
+    for (const { rota, ip, statusCode, criadoEm } of linhas) {
+        const motivo = classificarRotaSuspeita(rota, statusCode);
         if (motivo === null) continue;
 
         totalGeral += 1;
