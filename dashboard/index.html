@@ -26,9 +26,11 @@
   <!-- ==========================================================================
        SIDEBAR — navegação entre abas. Cada botão ativa uma aba (data-aba)
        trocando qual .aba-conteudo fica visível (ver ativarAba em script.js).
-       Logs de cadastro e Requests são abas SEPARADAS de propósito: são
+       Logs de ativação e Requests são abas SEPARADAS de propósito: são
        tabelas diferentes (log_cadastros vs request_logs, ver admin.js) —
-       uma é "quem se cadastrou", a outra é "todo tráfego HTTP".
+       uma é "quem ativou a conta", a outra é "todo tráfego HTTP".
+       (nome da tabela/rota continua "cadastro" por enquanto — só o texto
+       visível pro usuário foi corrigido pra "ativação")
        Retraível via #sidebar-toggle-btn (ver ativarRetraido em script.js).
        ========================================================================== -->
   <nav class="sidebar" id="sidebar">
@@ -69,8 +71,8 @@
     <button type="button" class="sidebar-link" data-aba="graficos-comercial" title="Gráficos comerciais">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Gráficos comerciais</span>
     </button>
-    <button type="button" class="sidebar-link sidebar-link-tecnico" data-aba="logs-cadastro" title="Logs de cadastro">
-      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Logs de cadastro</span>
+    <button type="button" class="sidebar-link sidebar-link-tecnico" data-aba="logs-cadastro" title="Logs de ativação">
+      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Logs de ativação</span>
     </button>
     <button type="button" class="sidebar-link" data-aba="retencao" title="Retenção &amp; Ativação">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Retenção &amp; Ativação</span>
@@ -431,7 +433,7 @@
         </div>
       </div>
 
-      <div class="section-title">Cobertura por município <span class="section-note">(usuários cadastrados vs prestadores geocodificados — geocoding de prestador roda em background, pode levar alguns minutos após o cadastro)</span></div>
+      <div class="section-title">Cobertura por município <span class="section-note">(usuários ativados vs prestadores geocodificados — geocoding de prestador roda em background, pode levar alguns minutos após a ativação)</span></div>
       <table>
         <thead>
           <tr>
@@ -557,8 +559,8 @@
       </div>
 
       <div class="section-title section-title-com-acoes">
-        <span>Cadastros por dia</span>
-        <div class="periodo-seletor" id="cadastros-periodo-seletor" role="group" aria-label="Período do gráfico de cadastros">
+        <span>Ativações por dia</span>
+        <div class="periodo-seletor" id="cadastros-periodo-seletor" role="group" aria-label="Período do gráfico de ativações">
           <button type="button" data-dias="7">7d</button>
           <button type="button" data-dias="14" class="active">14d</button>
           <button type="button" data-dias="30">30d</button>
@@ -571,7 +573,7 @@
         <div class="area-chart" id="chart-cadastros-dia"><div class="empty-state">carregando…</div></div>
       </div>
 
-      <div class="section-title">Cadastros por hora <span class="section-note">(últimas 24h — horário do dia com mais cadastro)</span></div>
+      <div class="section-title">Ativações por hora <span class="section-note">(últimas 24h — horário do dia com mais ativação)</span></div>
       <div class="chart-card">
         <div class="area-chart" id="chart-cadastros-hora"><div class="empty-state">carregando…</div></div>
       </div>
@@ -617,7 +619,7 @@
 
     <!-- ==================== ABA: LOGS DE CADASTRO ==================== -->
     <section class="aba-conteudo" id="aba-logs-cadastro" hidden>
-      <div class="section-title">Logs de cadastro <span class="section-note">(um snapshot por conta criada — nome, IP, localização no instante do cadastro)</span></div>
+      <div class="section-title">Logs de ativação <span class="section-note">(um snapshot por conta criada — nome, IP, localização no instante da ativação)</span></div>
       <div class="table-toolbar">
         <input type="search" id="logs-cadastro-busca" class="table-busca" placeholder="Buscar por nome, e-mail ou IP…">
         <button type="button" id="logs-cadastro-exportar-btn" class="toolbar-btn">Exportar CSV</button>
@@ -647,7 +649,7 @@
     <!-- ==================== ABA: RETENÇÃO & ATIVAÇÃO ==================== -->
     <section class="aba-conteudo" id="aba-retencao" hidden>
 
-      <div class="section-title">Retenção por coorte <span class="section-note">(% de cada leva semanal de cadastros que voltou a usar o app N semanas depois)</span></div>
+      <div class="section-title">Retenção por coorte <span class="section-note">(% de cada leva semanal de ativações que voltou a usar o app N semanas depois)</span></div>
       <div class="chart-card">
         <div id="tabela-retencao"><div class="empty-state">carregando…</div></div>
       </div>
