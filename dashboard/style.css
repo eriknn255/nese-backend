@@ -749,6 +749,10 @@
   .sidebar-theme-btn:active { transform: scale(0.96); }
   .sidebar-theme-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 
+  /* .sidebar-theme-btn reaproveitado num <a> (link pra moderacao.html) —
+     zera o sublinhado padrão de link que a classe não cobre sozinha. */
+  a.sidebar-theme-btn { text-decoration: none; }
+
   .main-area {
     flex: 1;
     min-width: 0;
@@ -1036,11 +1040,13 @@
   }
 
 
-  #usuarios-tbody tr.clickable-row {
+  #usuarios-tbody tr.clickable-row,
+  #prestadores-tbody tr.clickable-row {
     cursor: pointer;
   }
 
-  #usuarios-tbody tr.clickable-row:hover {
+  #usuarios-tbody tr.clickable-row:hover,
+  #prestadores-tbody tr.clickable-row:hover {
     background: var(--row-hover);
   }
 
