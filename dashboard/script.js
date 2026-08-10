@@ -19,8 +19,8 @@ const ENDPOINT_CONTAS_MORTAS = 'https://nese-be.ruexinternet.com/api/admin/dashb
 const ENDPOINT_AVALIACOES_INSIGHTS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/avaliacoes-insights';
 const ENDPOINT_WHATSAPP = 'https://nese-be.ruexinternet.com/api/admin/dashboard/whatsapp';
 const ENDPOINT_COBERTURA = 'https://nese-be.ruexinternet.com/api/admin/dashboard/cobertura';
-const ENDPOINT_BUSCAS_SEM_RESULTADO = 'https://nese-be.ruexinternet.com/api/admin/dashboard/buscas-sem-resultado';
 const ENDPOINT_MAPA_PRESTADORES = 'https://nese-be.ruexinternet.com/api/admin/dashboard/mapa-prestadores';
+const ENDPOINT_MAPA_BUSCAS_SEM_RESULTADO = 'https://nese-be.ruexinternet.com/api/admin/dashboard/mapa-buscas-sem-resultado';
 const ENDPOINT_ALERTAS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/alertas';
 const ENDPOINT_STATUS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/status';
 const ENDPOINT_SEGURANCA_IPS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/seguranca/ips';
@@ -927,23 +927,15 @@ async function carregarGraficosComercial(token) {
   }
 }
 
-// ---- Localização (País/Estado/Cidade) ----
-
-function renderListaLocalizacao(elementId, linhas, campo) {
-  const el = document.getElementById(elementId);
-  if (!linhas || linhas.length === 0) {
-    el.innerHTML = '<li class="empty-state">Nenhum dado ainda.</li>';
-    return;
-  }
-  el.innerHTML = linhas.map(l => `
-    <li><span>${escaparHtml(l[campo])}</span><span class="loc-total">${l.total}</span></li>
-  `).join('');
-}
+// ---- Mapa de densidade de usuários (aba Visão geral) ----
+// As listas País/Estado/Cidade que existiam aqui saíram — eram só de
+// usuário e redundantes com "Cobertura por município" (aba Oferta &
+// Demanda), que já mostra usuário x prestador por município. O backend
+// (/dashboard/localizacao) continua devolvendo porPais/porEstado/
+// porMunicipio por compatibilidade, mas o front não usa mais — só
+// pontosUsuarios, pro heatmap.
 
 function renderLocalizacaoErro(mensagem) {
-  ['loc-pais', 'loc-estado', 'loc-municipio'].forEach(id => {
-    document.getElementById(id).innerHTML = `<li class="empty-state">${escaparHtml(mensagem)}</li>`;
-  });
   renderMapaDensidadeUsuariosErro(mensagem);
 }
 
@@ -955,9 +947,6 @@ async function carregarLocalizacao(token) {
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    renderListaLocalizacao('loc-pais', data.porPais, 'pais');
-    renderListaLocalizacao('loc-estado', data.porEstado, 'estado');
-    renderListaLocalizacao('loc-municipio', data.porMunicipio, 'municipio');
     renderMapaDensidadeUsuarios(data.pontosUsuarios);
   } catch (e) {
     renderLocalizacaoErro(`Erro ao carregar (${e.message}).`);
@@ -1362,82 +1351,122 @@ async function carregarCobertura(token) {
   }
 }
 
-// Visão geral por categoria (sem quebrar por município) — o ranking
-// categoria+município que morava aqui foi pro endpoint unificado, ver
-// renderDemandaNaoAtendida/carregarDemandaNaoAtendida abaixo.
-function renderBuscasSemResultado(data) {
-  document.getElementById('stat-buscas-sem-resultado-total').textContent = data.totalGeral ?? 0;
-  document.getElementById('stat-buscas-sem-resultado-pendentes').textContent = data.pendentesGeocoding ?? 0;
+// ---- Demanda não atendida por município (gráfico misto: barra + linha) ----
+// Substitui tanto o antigo gráfico "Buscas sem resultado por categoria"
+// quanto a tabela "Demanda não atendida por categoria + município" — uma
+// única visão por MUNICÍPIO (ver comentário em /dashboard/demanda-nao-
+// atendida, admin.js): barra = volume de busca sem resultado ali, linha =
+// quantas categorias diferentes têm os dois sinais concordando
+// ("confirmada"). O detalhe por nível (observada/inferida) fica no
+// tooltip, não precisa de tabela à parte.
+let instanciaGraficoDemandaMunicipio = null;
 
-  const chart = document.getElementById('chart-buscas-sem-resultado-categoria');
-  if (!data.porCategoria || data.porCategoria.length === 0) {
-    chart.innerHTML = '<div class="empty-state">Nenhuma busca sem resultado registrada ainda.</div>';
+function renderGraficoDemandaMunicipio(porMunicipio) {
+  const container = document.getElementById('chart-demanda-municipio');
+
+  if (!porMunicipio || porMunicipio.length === 0) {
+    if (instanciaGraficoDemandaMunicipio) {
+      instanciaGraficoDemandaMunicipio.destroy();
+      instanciaGraficoDemandaMunicipio = null;
+    }
+    container.innerHTML = '<div class="empty-state">Nenhuma lacuna encontrada (ou dados insuficientes ainda).</div>';
     return;
   }
-  const maiorTotal = Math.max(...data.porCategoria.map(l => l.total), 1);
-  chart.innerHTML = data.porCategoria.map(l => {
-    const larguraPct = Math.max((l.total / maiorTotal) * 100, 3);
-    return `
-      <div class="bar-row">
-        <span class="bar-row-label" title="${escaparHtml(l.categoria)}">${escaparHtml(l.categoria)}</span>
-        <div class="bar-row-track"><div class="bar-row-fill" style="width:${larguraPct}%"></div></div>
-        <span class="bar-row-valor">${l.total}</span>
-      </div>
-    `;
-  }).join('');
-}
 
-function renderBuscasSemResultadoErro(mensagem) {
-  document.getElementById('stat-buscas-sem-resultado-total').textContent = '—';
-  document.getElementById('stat-buscas-sem-resultado-pendentes').textContent = '—';
-  document.getElementById('chart-buscas-sem-resultado-categoria').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
-}
-
-async function carregarBuscasSemResultado(token) {
-  try {
-    const res = await fetch(ENDPOINT_BUSCAS_SEM_RESULTADO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
-    if (res.status === 401) throw new Error('token inválido');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    renderBuscasSemResultado(data);
-  } catch (e) {
-    renderBuscasSemResultadoErro(`Erro ao carregar (${e.message}).`);
+  if (instanciaGraficoDemandaMunicipio) {
+    instanciaGraficoDemandaMunicipio.destroy();
+    instanciaGraficoDemandaMunicipio = null;
   }
-}
 
-// Ranking único categoria+município, substituindo as duas tabelas que
-// competiam entre si (ver comentário em /dashboard/demanda-nao-atendida
-// no admin.js). 'nivel' vem pronto do backend — o front só decide a cor
-// do badge.
-const NIVEL_BADGE_CLASSE = {
-  confirmada: 'count-badge erro',
-  observada: 'count-badge',
-  inferida: 'count-badge zero'
-};
-const NIVEL_LABEL = {
-  confirmada: 'Confirmada',
-  observada: 'Observada',
-  inferida: 'Inferida'
-};
+  container.innerHTML = '<canvas id="chart-demanda-municipio-canvas"></canvas>';
 
-function renderDemandaNaoAtendida(oportunidades) {
-  const tbody = document.getElementById('demanda-nao-atendida-tbody');
-  if (!oportunidades || oportunidades.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Nenhuma lacuna encontrada (ou dados insuficientes ainda).</td></tr>';
-    return;
-  }
-  tbody.innerHTML = oportunidades.map(o => `
-    <tr>
-      <td>${escaparHtml(o.categoria)}</td>
-      <td>${escaparHtml(o.municipio)}${o.estado ? ` / ${escaparHtml(o.estado)}` : ''}</td>
-      <td><span class="${NIVEL_BADGE_CLASSE[o.nivel] || 'count-badge'}">${NIVEL_LABEL[o.nivel] || o.nivel}</span></td>
-      <td>${o.totalBuscas > 0 ? o.totalBuscas : '—'}</td>
-    </tr>
-  `).join('');
+  const corBarra = corCss('--red');
+  const corLinha = corCss('--gold');
+  const corGrade = corCss('--border');
+  const corTexto = corCss('--muted');
+
+  const labels = porMunicipio.map(m => m.estado ? `${m.municipio}/${m.estado}` : m.municipio);
+
+  instanciaGraficoDemandaMunicipio = new Chart(document.getElementById('chart-demanda-municipio-canvas'), {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Buscas sem resultado',
+          data: porMunicipio.map(m => m.totalBuscas),
+          backgroundColor: corBarra + 'aa',
+          borderRadius: 3,
+          yAxisID: 'yBuscas'
+        },
+        {
+          type: 'line',
+          label: 'Categorias c/ gap confirmado',
+          data: porMunicipio.map(m => m.categoriasConfirmadas),
+          borderColor: corLinha,
+          backgroundColor: corLinha,
+          tension: 0.3,
+          borderWidth: 2,
+          pointRadius: 4,
+          pointBackgroundColor: corLinha,
+          yAxisID: 'yCategorias'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: corTexto, font: { family: 'IBM Plex Mono, monospace', size: 10.5 } }
+        },
+        tooltip: {
+          // Detalhe por nível (observada/inferida) — a barra e a linha já
+          // mostram volume e "confirmada", isso completa o quadro sem
+          // precisar de uma tabela à parte.
+          callbacks: {
+            afterBody: (items) => {
+              const m = porMunicipio[items[0].dataIndex];
+              const partes = [];
+              if (m.categoriasObservadas) partes.push(`${m.categoriasObservadas} categoria(s) só observada(s) (busca sem resultado, sem gap confirmado)`);
+              if (m.categoriasInferidas) partes.push(`${m.categoriasInferidas} categoria(s) só inferida(s) (gap teórico, ninguém buscou ainda)`);
+              return partes;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: corGrade },
+          ticks: { color: corTexto, font: { family: 'IBM Plex Mono, monospace', size: 10 }, maxRotation: 40, minRotation: 40 }
+        },
+        yBuscas: {
+          beginAtZero: true,
+          position: 'left',
+          grid: { color: corGrade },
+          ticks: { color: corTexto, precision: 0, font: { size: 10.5 } },
+          title: { display: true, text: 'Buscas sem resultado', color: corTexto, font: { size: 10 } }
+        },
+        yCategorias: {
+          beginAtZero: true,
+          position: 'right',
+          grid: { display: false },
+          ticks: { color: corTexto, precision: 0, font: { size: 10.5 } },
+          title: { display: true, text: 'Categorias c/ gap confirmado', color: corTexto, font: { size: 10 } }
+        }
+      }
+    }
+  });
 }
 
 function renderDemandaNaoAtendidaErro(mensagem) {
-  document.getElementById('demanda-nao-atendida-tbody').innerHTML = `<tr><td colspan="4" class="empty-state">${escaparHtml(mensagem)}</td></tr>`;
+  if (instanciaGraficoDemandaMunicipio) {
+    console.error('Falha ao atualizar gráfico de demanda não atendida (gráfico existente preservado na tela):', mensagem);
+    return;
+  }
+  document.getElementById('chart-demanda-municipio').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
 }
 
 async function carregarDemandaNaoAtendida(token) {
@@ -1446,7 +1475,7 @@ async function carregarDemandaNaoAtendida(token) {
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    renderDemandaNaoAtendida(data.oportunidades);
+    renderGraficoDemandaMunicipio(data.porMunicipio);
   } catch (e) {
     renderDemandaNaoAtendidaErro(`Erro ao carregar (${e.message}).`);
   }
@@ -1635,6 +1664,7 @@ function garantirMapaDensidade() {
 function alternarTilesMapa() {
   if (camadaTilesDensidade) camadaTilesDensidade.setUrl(urlTilesParaTema());
   if (camadaTilesDensidadeUsuarios) camadaTilesDensidadeUsuarios.setUrl(urlTilesParaTema());
+  if (camadaTilesDensidadeBuscas) camadaTilesDensidadeBuscas.setUrl(urlTilesParaTema());
 }
 
 function renderMapaDensidade(prestadores) {
@@ -1745,6 +1775,71 @@ function renderMapaDensidadeUsuariosErro(mensagem) {
   camadaTilesDensidadeUsuarios = null;
 }
 
+// ---- Mapa de densidade de BUSCAS SEM RESULTADO (aba Oferta & Demanda) ----
+// Mesmo padrão exato dos dois mapas acima, alimentado por
+// GET /dashboard/mapa-buscas-sem-resultado (lat/lng cru de
+// buscas_sem_resultado). Fica lado a lado com o mapa de prestadores na
+// aba "Oferta & Demanda" — os dois lados da mesma pergunta ("onde tem
+// oferta" vs "onde a demanda esbarrou em nada"). Instância própria, pelo
+// mesmo motivo dos outros dois: cada heatmap precisa da sua própria
+// instância do Leaflet.
+let mapaDensidadeBuscas = null;
+let camadaHeatDensidadeBuscas = null;
+let camadaTilesDensidadeBuscas = null;
+
+function garantirMapaDensidadeBuscas() {
+  if (mapaDensidadeBuscas) return mapaDensidadeBuscas;
+  const container = document.getElementById('mapa-densidade-buscas');
+  container.innerHTML = ''; // remove o "carregando…"/erro antes do Leaflet assumir o container
+  mapaDensidadeBuscas = L.map(container, { attributionControl: true, zoomControl: true })
+    .setView([-14.235, -51.9253], 4);
+  camadaTilesDensidadeBuscas = L.tileLayer(urlTilesParaTema(), {
+    maxZoom: 18,
+    attribution: '&copy; OpenStreetMap &copy; CARTO'
+  }).addTo(mapaDensidadeBuscas);
+  return mapaDensidadeBuscas;
+}
+
+function renderMapaDensidadeBuscas(buscas) {
+  const mapa = garantirMapaDensidadeBuscas();
+
+  if (camadaHeatDensidadeBuscas) {
+    mapa.removeLayer(camadaHeatDensidadeBuscas);
+    camadaHeatDensidadeBuscas = null;
+  }
+
+  if (!buscas || buscas.length === 0) return;
+
+  const pontos = buscas.map(b => [b.lat, b.lng]);
+  camadaHeatDensidadeBuscas = L.heatLayer(pontos, { radius: 18, blur: 22, maxZoom: 10 }).addTo(mapa);
+}
+
+// Mesmo raciocínio de renderMapaDensidadeErro/renderMapaDensidadeUsuariosErro
+// (ver comentários acima): só destrói o mapa se ainda não existe um de
+// verdade na tela.
+function renderMapaDensidadeBuscasErro(mensagem) {
+  if (mapaDensidadeBuscas) {
+    console.error('Falha ao atualizar mapa de densidade de buscas sem resultado (mapa existente preservado na tela):', mensagem);
+    return;
+  }
+  document.getElementById('mapa-densidade-buscas').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
+  mapaDensidadeBuscas = null;
+  camadaHeatDensidadeBuscas = null;
+  camadaTilesDensidadeBuscas = null;
+}
+
+async function carregarMapaBuscasSemResultado(token) {
+  try {
+    const res = await fetch(ENDPOINT_MAPA_BUSCAS_SEM_RESULTADO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderMapaDensidadeBuscas(data.buscas);
+  } catch (e) {
+    renderMapaDensidadeBuscasErro(`Erro ao carregar (${e.message}).`);
+  }
+}
+
 function renderInsightsErro(mensagem) {
   document.getElementById('tabela-retencao').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
   ['funil-servico-pct', 'funil-avaliacao-pct', 'funil-salvo-pct'].forEach(id => document.getElementById(id).textContent = '—');
@@ -1757,7 +1852,6 @@ function renderInsightsErro(mensagem) {
   document.getElementById('chart-whatsapp-prestador').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
   document.getElementById('chart-whatsapp-categoria').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
   document.getElementById('cobertura-tbody').innerHTML = `<tr><td colspan="3" class="empty-state">${escaparHtml(mensagem)}</td></tr>`;
-  renderBuscasSemResultadoErro(mensagem);
   renderDemandaNaoAtendidaErro(mensagem);
   renderModeracaoErro(mensagem);
   renderChurnErro(mensagem);
@@ -2097,7 +2191,6 @@ async function carregarInsights(token) {
     carregarModeracao(token),
     carregarWhatsapp(token),
     carregarCobertura(token),
-    carregarBuscasSemResultado(token),
     carregarDemandaNaoAtendida(token),
     carregarPrestadoresIncompletos(token)
   ]);
@@ -2136,7 +2229,7 @@ const TITULOS_ABA = {
   'status': 'Status',
   'seguranca': 'Segurança',
   'usuarios': 'Usuários',
-  'localizacao': 'Localização',
+  'oferta-demanda': 'Oferta & Demanda',
   'graficos-tecnico': 'Gráficos técnicos',
   'graficos-comercial': 'Gráficos comerciais',
   'logs-cadastro': 'Logs de cadastro',
@@ -2170,9 +2263,16 @@ function ativarAba(nomeAba) {
   // tamanho — sem invalidateSize() ele fica com tiles faltando/
   // desalinhados até alguém arrastar ou dar zoom manualmente. Chamado só
   // ao ENTRAR na aba (não a cada load()), senão recalcula sem necessidade
-  // a cada 30s com a aba já visível.
-  if (nomeAba === 'localizacao' && mapaDensidade) {
-    mapaDensidade.invalidateSize();
+  // a cada 30s com a aba já visível. "Oferta & Demanda" tem os DOIS mapas
+  // (prestadores + buscas sem resultado) lado a lado — os dois precisam
+  // do invalidateSize().
+  if (nomeAba === 'oferta-demanda') {
+    if (mapaDensidade) mapaDensidade.invalidateSize();
+    if (mapaDensidadeBuscas) mapaDensidadeBuscas.invalidateSize();
+    // Mesmo problema do Chart.js em redimensionarGraficosArea() (acima) —
+    // esse gráfico misto não é um "gráfico de área" e não vive no dict
+    // instanciasGraficoArea, então não é pego por aquela função.
+    if (instanciaGraficoDemandaMunicipio) instanciaGraficoDemandaMunicipio.resize();
   }
   if (nomeAba === 'visao-geral' && mapaDensidadeUsuarios) {
     mapaDensidadeUsuarios.invalidateSize();
@@ -2243,6 +2343,7 @@ async function load() {
     renderGraficosComerciaisErro('Preencha o token de admin acima pra carregar.');
     renderInsightsErro('Preencha o token de admin acima pra carregar.');
     renderMapaDensidadeErro('Preencha o token de admin acima pra carregar o mapa.');
+    renderMapaDensidadeBuscasErro('Preencha o token de admin acima pra carregar o mapa.');
     renderAlertasErro('Preencha o token de admin acima pra carregar.');
     renderStatusErro('Preencha o token de admin acima pra carregar.');
     renderSegurancaErro('Preencha o token de admin acima pra carregar.');
@@ -2285,7 +2386,7 @@ async function load() {
   // segurança contra alguma dessas funções um dia esquecer de tratar o
   // próprio erro (regressão futura) — não deveria disparar no uso normal.
   try {
-    await Promise.all([carregarUsuarios(token), carregarRequests(token), carregarLocalizacao(token), carregarLogsCadastro(token), carregarGraficosTecnicos(token), carregarGraficosComercial(token), carregarInsights(token), carregarMapaPrestadores(token), carregarAlertas(token), carregarStatus(token), carregarSeguranca(token)]);
+    await Promise.all([carregarUsuarios(token), carregarRequests(token), carregarLocalizacao(token), carregarLogsCadastro(token), carregarGraficosTecnicos(token), carregarGraficosComercial(token), carregarInsights(token), carregarMapaPrestadores(token), carregarMapaBuscasSemResultado(token), carregarAlertas(token), carregarStatus(token), carregarSeguranca(token)]);
   } catch (e) {
     console.error('Uma das abas não tratou o próprio erro internamente:', e);
   }
