@@ -1091,15 +1091,12 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     width: 100%;
-    max-width: 560px;
+    max-width: 1260px;
     max-height: 85vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  }
-  .user{
-      max-width: 1260px;
   }
 
   .modal-header {
