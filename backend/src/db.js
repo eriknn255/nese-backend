@@ -201,4 +201,49 @@ db.exec(`
     )
 `);
 
+// ==========================================================================
+// log_auditoria_moderacao — quem mudou o quê na tela de moderação (ver
+// comentário que existia em routes/admin.js: "refinamentos (motivo de
+// edição, log de auditoria de quem mudou o quê) ficam pra depois" — isto
+// é esse "depois"). Cobre PATCH e DELETE de /api/admin/moderacao/*
+// (usuários e prestadores); NÃO cobre o resto do painel, que é só leitura.
+//
+// moderador: não existe conceito de "usuário admin" no schema (só um
+// ADMIN_TOKEN fixo compartilhado — ver exigirAdmin em routes/admin.js),
+// então "quem" é um nome digitado pela pessoa moderando (ver campo
+// #admin-nome em moderacao/index.html, mesmo padrão do token: guardado
+// em localStorage, mandado no header X-Admin-Nome). Não autentica nada,
+// é só rótulo de auditoria — não impede ninguém de mentir o nome, mas já
+// é infinitamente melhor que "alguém com o token mexeu, sem saber quem".
+//
+// entidade_tipo/entidade_id: 'usuario'|'prestador' + o id da linha
+// afetada. SEM FOREIGN KEY de propósito — mesmo raciocínio de
+// auditoria_contas/log_cadastros: numa exclusão a linha referenciada já
+// não existe mais no momento em que o log é uma prova útil de auditoria,
+// uma FK aqui faria a própria gravação falhar bem na hora que mais
+// importa registrar.
+//
+// alteracoes: JSON.stringify de { campo: { de, para } } só dos campos que
+// de fato mudaram (PATCH) — nada gravado quando nada mudou de verdade.
+// Em DELETE guarda um snapshot completo da linha (JSON.stringify do
+// registro inteiro), já que depois de excluído não existe "antes" pra
+// comparar com nada.
+db.exec(`
+    CREATE TABLE IF NOT EXISTS log_auditoria_moderacao (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        moderador TEXT NOT NULL,
+        acao TEXT NOT NULL CHECK (acao IN ('editar', 'excluir')),
+        entidade_tipo TEXT NOT NULL CHECK (entidade_tipo IN ('usuario', 'prestador')),
+        entidade_id TEXT NOT NULL,
+        alteracoes TEXT,
+        criado_em INTEGER NOT NULL
+    )
+`);
+
+// Cobre os dois usos reais da aba "Log de auditoria" (ver GET
+// /moderacao/log em routes/admin.js): listagem geral por recência, e
+// "histórico desta conta/prestador" filtrado por entidade específica.
+db.exec("CREATE INDEX IF NOT EXISTS idx_log_auditoria_criado ON log_auditoria_moderacao(criado_em DESC)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_log_auditoria_entidade ON log_auditoria_moderacao(entidade_tipo, entidade_id, criado_em DESC)");
+
 module.exports = db;
