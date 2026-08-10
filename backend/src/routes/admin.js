@@ -2198,8 +2198,10 @@ router.get("/dashboard/acessos-indevidos", exigirAdmin, (req, res) => {
 // usuarios.js/prestadores.js (exigirUsuario + checagem de dono), estas
 // não verificam posse — quem tem o ADMIN_TOKEN pode editar/excluir
 // QUALQUER conta ou prestador da plataforma. É a base pedida pra uma
-// tela de moderação; o "grosso" agora, refinamentos (motivo de edição,
-// log de auditoria de quem mudou o quê) ficam pra depois se precisar.
+// tela de moderação, agora com um log de auditoria de quem mudou o quê
+// (ver registrarAuditoria abaixo e a tabela log_auditoria_moderacao em
+// db.js) — motivo de edição em texto livre continua de fora, fica pra
+// depois se precisar.
 // ==========================================================================
 
 const { sanitizarTexto: sanitizarTextoModeracao } = require("../utils/sanitizar");
@@ -2223,6 +2225,44 @@ function normalizarDiasSemanaModeracao(diasSemana) {
     if (!Array.isArray(diasSemana)) return [0, 1, 2, 3, 4, 5, 6];
     const validos = [...new Set(diasSemana.filter(d => Number.isInteger(d) && d >= 0 && d <= 6))];
     return validos.length > 0 ? validos : [0, 1, 2, 3, 4, 5, 6];
+}
+
+// ==========================================================================
+// AUDITORIA — ver tabela log_auditoria_moderacao em db.js pro raciocínio
+// completo (por que não tem FK, por que "moderador" é só um nome digitado
+// e não um usuário de verdade).
+//
+// nomeModerador: lê o header X-Admin-Nome (mandado pelo front — ver
+// #admin-nome/chamarApi em moderacao/script.js). Não autentica nada (só
+// o ADMIN_TOKEN de exigirAdmin faz isso); é só o rótulo que vai pro log.
+// Sem o header (ex: chamada feita fora do front, curl direto), cai pra
+// "desconhecido" — nunca bloqueia a ação em si por falta de nome.
+function nomeModerador(req) {
+    const bruto = sanitizarTextoModeracao(req.header("X-Admin-Nome"), 60);
+    return bruto || "desconhecido";
+}
+
+function registrarAuditoria({ moderador, acao, entidadeTipo, entidadeId, alteracoes }) {
+    db.prepare(`
+        INSERT INTO log_auditoria_moderacao (moderador, acao, entidade_tipo, entidade_id, alteracoes, criado_em)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(moderador, acao, entidadeTipo, entidadeId, alteracoes ? JSON.stringify(alteracoes) : null, Date.now());
+}
+
+// Monta { campo: { de, para } } só dos campos que de fato mudaram — evita
+// gravar "editou" com um diff vazio quando o PATCH reenvia os mesmos
+// valores (comum quando o front manda o form inteiro de volta).
+function diffCampos(antes, depois) {
+    const alteracoes = {};
+    for (const campo of Object.keys(depois)) {
+        const valorAntes = antes[campo];
+        const valorDepois = depois[campo];
+        const igual = Array.isArray(valorDepois)
+            ? JSON.stringify(valorAntes) === JSON.stringify(valorDepois)
+            : valorAntes === valorDepois;
+        if (!igual) alteracoes[campo] = { de: valorAntes ?? null, para: valorDepois ?? null };
+    }
+    return Object.keys(alteracoes).length > 0 ? alteracoes : null;
 }
 
 // GET /api/admin/moderacao/prestadores?busca=&limit=
@@ -2334,16 +2374,36 @@ router.patch("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
         tags: JSON.stringify(tags)
     });
 
+    const alteracoes = diffCampos(
+        {
+            categoria: atual.categoria, descricao: atual.descricao, telefone: atual.telefone, cor: atual.cor,
+            lat: atual.lat, lng: atual.lng, horarioAbre: atual.horario_abre, horarioFecha: atual.horario_fecha,
+            diasSemana: atual.dias_semana ? JSON.parse(atual.dias_semana) : [0, 1, 2, 3, 4, 5, 6],
+            tags: JSON.parse(atual.tags || "[]")
+        },
+        { categoria, descricao, telefone, cor, lat, lng, horarioAbre, horarioFecha, diasSemana, tags }
+    );
+    if (alteracoes) {
+        registrarAuditoria({
+            moderador: nomeModerador(req), acao: "editar",
+            entidadeTipo: "prestador", entidadeId: req.params.id, alteracoes
+        });
+    }
+
     const linha = db.prepare(`${SELECT_PRESTADORES_COM_NOTA} WHERE p.id = ? GROUP BY p.id`).get(req.params.id);
     res.json(formatarPrestador(linha));
 });
 
 // DELETE /api/admin/moderacao/prestadores/:id — sem checagem de dono.
 router.delete("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
-    const linha = db.prepare("SELECT id FROM prestadores WHERE id = ?").get(req.params.id);
+    const linha = db.prepare("SELECT * FROM prestadores WHERE id = ?").get(req.params.id);
     if (!linha) return res.status(404).json({ erro: "Prestador não encontrado." });
 
     db.prepare("DELETE FROM prestadores WHERE id = ?").run(req.params.id);
+    registrarAuditoria({
+        moderador: nomeModerador(req), acao: "excluir",
+        entidadeTipo: "prestador", entidadeId: req.params.id, alteracoes: linha
+    });
     res.status(204).end();
 });
 
@@ -2393,6 +2453,17 @@ router.patch("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
     db.prepare("UPDATE usuarios SET nome = ?, email = ?, telefone = ?, cpf_cnpj = ? WHERE id = ?")
         .run(nome, email, telefone, cpfCnpj, req.params.id);
 
+    const alteracoesUsuario = diffCampos(
+        { nome: atual.nome, email: atual.email, telefone: atual.telefone, cpfCnpj: atual.cpf_cnpj },
+        { nome, email, telefone, cpfCnpj }
+    );
+    if (alteracoesUsuario) {
+        registrarAuditoria({
+            moderador: nomeModerador(req), acao: "editar",
+            entidadeTipo: "usuario", entidadeId: req.params.id, alteracoes: alteracoesUsuario
+        });
+    }
+
     const atualizado = db.prepare(`
         SELECT id, nome, email, telefone, cpf_cnpj AS cpfCnpj, avatar_url AS avatarUrl, criado_em AS criadoEm
         FROM usuarios WHERE id = ?
@@ -2406,7 +2477,7 @@ router.patch("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
 // detalhe de cada passo (ordem de FK, auditoria_contas, limpeza de
 // arquivo fora da transação).
 router.delete("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
-    const usuario = db.prepare("SELECT criado_em FROM usuarios WHERE id = ?").get(req.params.id);
+    const usuario = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(req.params.id);
     if (!usuario) return res.status(404).json({ erro: "Conta não encontrada." });
 
     const excluirTransacao = db.transaction((usuarioId) => {
@@ -2431,6 +2502,15 @@ router.delete("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
         return res.status(500).json({ erro: "Não foi possível excluir a conta agora. Tente de novo em instantes." });
     }
 
+    // Mesma disciplina de privacidade de auditoria_contas (ver schema.sql):
+    // nada de nome/e-mail/telefone sobrevivendo aqui, só o suficiente pra
+    // provar QUE a conta existiu e quando foi excluída.
+    registrarAuditoria({
+        moderador: nomeModerador(req), acao: "excluir",
+        entidadeTipo: "usuario", entidadeId: req.params.id,
+        alteracoes: { criadoEm: usuario.criado_em }
+    });
+
     fs.rm(path.join(BASE_UPLOADS_MODERACAO, req.params.id), { recursive: true, force: true }, () => {});
     fs.readdir(BASE_UPLOADS_MODERACAO, (erro, entradas) => {
         if (erro) return;
@@ -2440,6 +2520,44 @@ router.delete("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
     });
 
     res.status(204).end();
+});
+
+// GET /api/admin/moderacao/log?limit=&entidadeTipo=&entidadeId=
+// Listagem geral (aba "Log de auditoria" da moderação) e, com
+// entidadeTipo+entidadeId, o "histórico desta conta/prestador" mostrado
+// dentro do modal de edição (ver carregarHistoricoEntidade em
+// moderacao/script.js). Sem paginação de servidor de verdade — mesmo
+// padrão de limit simples já usado no resto do painel.
+router.get("/moderacao/log", exigirAdmin, (req, res) => {
+    const limite = lerLimite(req, 100, 500);
+    const entidadeTipo = req.query.entidadeTipo === "usuario" || req.query.entidadeTipo === "prestador"
+        ? req.query.entidadeTipo
+        : null;
+    const entidadeId = entidadeTipo ? sanitizarTextoModeracao(req.query.entidadeId, 100) : null;
+
+    let linhas;
+    if (entidadeTipo && entidadeId) {
+        linhas = db.prepare(`
+            SELECT id, moderador, acao, entidade_tipo AS entidadeTipo, entidade_id AS entidadeId,
+                   alteracoes, criado_em AS criadoEm
+            FROM log_auditoria_moderacao
+            WHERE entidade_tipo = ? AND entidade_id = ?
+            ORDER BY criado_em DESC
+            LIMIT ?
+        `).all(entidadeTipo, entidadeId, limite);
+    } else {
+        linhas = db.prepare(`
+            SELECT id, moderador, acao, entidade_tipo AS entidadeTipo, entidade_id AS entidadeId,
+                   alteracoes, criado_em AS criadoEm
+            FROM log_auditoria_moderacao
+            ORDER BY criado_em DESC
+            LIMIT ?
+        `).all(limite);
+    }
+
+    res.json({
+        log: linhas.map(l => ({ ...l, alteracoes: l.alteracoes ? JSON.parse(l.alteracoes) : null }))
+    });
 });
 
 module.exports = router;
