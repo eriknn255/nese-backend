@@ -24,6 +24,7 @@ const ENDPOINT_MAPA_BUSCAS_SEM_RESULTADO = 'https://nese-be.ruexinternet.com/api
 const ENDPOINT_ALERTAS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/alertas';
 const ENDPOINT_STATUS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/status';
 const ENDPOINT_SEGURANCA_IPS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/seguranca/ips';
+const ENDPOINT_ACESSOS_INDEVIDOS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/acessos-indevidos';
 const ENDPOINT_DEMANDA_NAO_ATENDIDA = 'https://nese-be.ruexinternet.com/api/admin/dashboard/demanda-nao-atendida';
 const ENDPOINT_MODERACAO = 'https://nese-be.ruexinternet.com/api/admin/dashboard/moderacao';
 const ENDPOINT_CHURN = 'https://nese-be.ruexinternet.com/api/admin/dashboard/churn';
@@ -361,9 +362,17 @@ function renderRequests(requests) {
     tbody.innerHTML = requests.map(r => {
       const ehErro = r.statusCode >= 400;
       const badgeClasse = ehErro ? 'count-badge erro' : 'count-badge zero';
+      // suspeita/motivoSuspeita vêm prontos do backend (ver
+      // classificarRotaSuspeita em admin.js) — não é recalculado aqui,
+      // só decide como desenhar: linha com leve destaque + uma marca
+      // antes da rota, com o motivo específico no title (tooltip).
+      const linhaClasse = r.suspeita ? ' class="linha-suspeita"' : '';
+      const marca = r.suspeita
+        ? `<span class="suspeita-marca" title="Sinalizado: ${escaparHtml(r.motivoSuspeita || '')}">⚑</span> `
+        : '';
       return `
-        <tr>
-          <td class="id-mono">${escaparHtml(r.rota)}</td>
+        <tr${linhaClasse}>
+          <td class="id-mono">${marca}${escaparHtml(r.rota)}</td>
           <td class="id-mono">${escaparHtml(r.metodo)}</td>
           <td><span class="${badgeClasse}">${r.statusCode}</span></td>
           <td class="last-seen">${r.duracaoMs} ms</td>
@@ -407,6 +416,7 @@ document.getElementById('requests-exportar-btn').addEventListener('click', () =>
     { rotulo: 'Duração (ms)', valor: r => r.duracaoMs },
     { rotulo: 'IP', valor: r => r.ip || '' },
     { rotulo: 'Porta', valor: r => r.porta ?? '' },
+    { rotulo: 'Sinalizado', valor: r => r.suspeita ? (r.motivoSuspeita || 'sim') : '' },
     { rotulo: 'Quando', valor: r => formatarDataExata(r.criadoEm) }
   ], requestsListaCompleta);
 });
@@ -1084,6 +1094,7 @@ function renderModalErrosHoje(data) {
       <td class="last-seen">${e.duracaoMs} ms</td>
       <td class="id-mono">${escaparHtml(e.usuarioId || '—')}</td>
       <td class="id-mono">${escaparHtml(e.ip || '—')}</td>
+      <td class="id-mono">${e.porta ?? '—'}</td>
       <td class="last-seen">${formatarTempoRelativo(e.criadoEm)}</td>
     </tr>
   `).join('');
@@ -1098,7 +1109,7 @@ function renderModalErrosHoje(data) {
       <table>
         <thead>
           <tr>
-            <th>Rota</th><th>Método</th><th>Status</th><th>Duração</th><th>Usuário</th><th>IP</th><th>Quando</th>
+            <th>Rota</th><th>Método</th><th>Status</th><th>Duração</th><th>Usuário</th><th>IP</th><th>Porta</th><th>Quando</th>
           </tr>
         </thead>
         <tbody>${linhasHtml}</tbody>
@@ -1351,122 +1362,58 @@ async function carregarCobertura(token) {
   }
 }
 
-// ---- Demanda não atendida por município (gráfico misto: barra + linha) ----
-// Substitui tanto o antigo gráfico "Buscas sem resultado por categoria"
-// quanto a tabela "Demanda não atendida por categoria + município" — uma
-// única visão por MUNICÍPIO (ver comentário em /dashboard/demanda-nao-
-// atendida, admin.js): barra = volume de busca sem resultado ali, linha =
-// quantas categorias diferentes têm os dois sinais concordando
-// ("confirmada"). O detalhe por nível (observada/inferida) fica no
-// tooltip, não precisa de tabela à parte.
-let instanciaGraficoDemandaMunicipio = null;
+// ---- Demanda não atendida por município ----
+// Mesmo dado (porMunicipio, ver GET /dashboard/demanda-nao-atendida em
+// admin.js), duas leituras separadas em vez de um gráfico de eixo duplo
+// (ver comentário no HTML sobre por que o combo barra+linha foi
+// abandonado): um bar-chart horizontal pro volume, uma tabela pro detalhe
+// de nível — mesmo padrão visual do resto da aba, sem Chart.js aqui.
 
-function renderGraficoDemandaMunicipio(porMunicipio) {
-  const container = document.getElementById('chart-demanda-municipio');
-
+function renderGraficoDemandaMunicipioVolume(porMunicipio) {
+  const chart = document.getElementById('chart-demanda-municipio-volume');
   if (!porMunicipio || porMunicipio.length === 0) {
-    if (instanciaGraficoDemandaMunicipio) {
-      instanciaGraficoDemandaMunicipio.destroy();
-      instanciaGraficoDemandaMunicipio = null;
-    }
-    container.innerHTML = '<div class="empty-state">Nenhuma lacuna encontrada (ou dados insuficientes ainda).</div>';
+    chart.innerHTML = '<div class="empty-state">Nenhuma lacuna encontrada (ou dados insuficientes ainda).</div>';
     return;
   }
+  // Ordenado por categoriasConfirmadas (vem assim do backend) — mantém
+  // esse ranking aqui também, em vez de reordenar por volume: um
+  // município com MENOS buscas mas gap confirmado ainda aparece antes de
+  // um com mais buscas e nenhum gap confirmado, o que é o ponto certo a
+  // destacar primeiro.
+  const maiorTotal = Math.max(...porMunicipio.map(m => m.totalBuscas), 1);
+  chart.innerHTML = porMunicipio.map(m => {
+    const rotulo = m.estado ? `${m.municipio}/${m.estado}` : m.municipio;
+    const larguraPct = Math.max((m.totalBuscas / maiorTotal) * 100, 3);
+    return `
+      <div class="bar-row">
+        <span class="bar-row-label" title="${escaparHtml(rotulo)}">${escaparHtml(rotulo)}</span>
+        <div class="bar-row-track"><div class="bar-row-fill" style="width:${larguraPct}%"></div></div>
+        <span class="bar-row-valor">${m.totalBuscas}</span>
+      </div>
+    `;
+  }).join('');
+}
 
-  if (instanciaGraficoDemandaMunicipio) {
-    instanciaGraficoDemandaMunicipio.destroy();
-    instanciaGraficoDemandaMunicipio = null;
+function renderTabelaDemandaMunicipio(porMunicipio) {
+  const tbody = document.getElementById('demanda-municipio-tbody');
+  if (!porMunicipio || porMunicipio.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Nenhuma lacuna encontrada (ou dados insuficientes ainda).</td></tr>';
+    return;
   }
-
-  container.innerHTML = '<canvas id="chart-demanda-municipio-canvas"></canvas>';
-
-  const corBarra = corCss('--red');
-  const corLinha = corCss('--gold');
-  const corGrade = corCss('--border');
-  const corTexto = corCss('--muted');
-
-  const labels = porMunicipio.map(m => m.estado ? `${m.municipio}/${m.estado}` : m.municipio);
-
-  instanciaGraficoDemandaMunicipio = new Chart(document.getElementById('chart-demanda-municipio-canvas'), {
-    data: {
-      labels,
-      datasets: [
-        {
-          type: 'bar',
-          label: 'Buscas sem resultado',
-          data: porMunicipio.map(m => m.totalBuscas),
-          backgroundColor: corBarra + 'aa',
-          borderRadius: 3,
-          yAxisID: 'yBuscas'
-        },
-        {
-          type: 'line',
-          label: 'Categorias c/ gap confirmado',
-          data: porMunicipio.map(m => m.categoriasConfirmadas),
-          borderColor: corLinha,
-          backgroundColor: corLinha,
-          tension: 0.3,
-          borderWidth: 2,
-          pointRadius: 4,
-          pointBackgroundColor: corLinha,
-          yAxisID: 'yCategorias'
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 300 },
-      plugins: {
-        legend: {
-          display: true,
-          labels: { color: corTexto, font: { family: 'IBM Plex Mono, monospace', size: 10.5 } }
-        },
-        tooltip: {
-          // Detalhe por nível (observada/inferida) — a barra e a linha já
-          // mostram volume e "confirmada", isso completa o quadro sem
-          // precisar de uma tabela à parte.
-          callbacks: {
-            afterBody: (items) => {
-              const m = porMunicipio[items[0].dataIndex];
-              const partes = [];
-              if (m.categoriasObservadas) partes.push(`${m.categoriasObservadas} categoria(s) só observada(s) (busca sem resultado, sem gap confirmado)`);
-              if (m.categoriasInferidas) partes.push(`${m.categoriasInferidas} categoria(s) só inferida(s) (gap teórico, ninguém buscou ainda)`);
-              return partes;
-            }
-          }
-        }
-      },
-      scales: {
-        x: {
-          grid: { color: corGrade },
-          ticks: { color: corTexto, font: { family: 'IBM Plex Mono, monospace', size: 10 }, maxRotation: 40, minRotation: 40 }
-        },
-        yBuscas: {
-          beginAtZero: true,
-          position: 'left',
-          grid: { color: corGrade },
-          ticks: { color: corTexto, precision: 0, font: { size: 10.5 } },
-          title: { display: true, text: 'Buscas sem resultado', color: corTexto, font: { size: 10 } }
-        },
-        yCategorias: {
-          beginAtZero: true,
-          position: 'right',
-          grid: { display: false },
-          ticks: { color: corTexto, precision: 0, font: { size: 10.5 } },
-          title: { display: true, text: 'Categorias c/ gap confirmado', color: corTexto, font: { size: 10 } }
-        }
-      }
-    }
-  });
+  tbody.innerHTML = porMunicipio.map(m => `
+    <tr>
+      <td>${escaparHtml(m.municipio)}${m.estado ? ` / ${escaparHtml(m.estado)}` : ''}</td>
+      <td>${m.categoriasConfirmadas > 0 ? `<span class="count-badge erro">${m.categoriasConfirmadas}</span>` : '—'}</td>
+      <td>${m.categoriasObservadas > 0 ? m.categoriasObservadas : '—'}</td>
+      <td>${m.categoriasInferidas > 0 ? m.categoriasInferidas : '—'}</td>
+      <td>${m.totalBuscas > 0 ? m.totalBuscas : '—'}</td>
+    </tr>
+  `).join('');
 }
 
 function renderDemandaNaoAtendidaErro(mensagem) {
-  if (instanciaGraficoDemandaMunicipio) {
-    console.error('Falha ao atualizar gráfico de demanda não atendida (gráfico existente preservado na tela):', mensagem);
-    return;
-  }
-  document.getElementById('chart-demanda-municipio').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
+  document.getElementById('chart-demanda-municipio-volume').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
+  document.getElementById('demanda-municipio-tbody').innerHTML = `<tr><td colspan="5" class="empty-state">${escaparHtml(mensagem)}</td></tr>`;
 }
 
 async function carregarDemandaNaoAtendida(token) {
@@ -1475,7 +1422,8 @@ async function carregarDemandaNaoAtendida(token) {
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    renderGraficoDemandaMunicipio(data.porMunicipio);
+    renderGraficoDemandaMunicipioVolume(data.porMunicipio);
+    renderTabelaDemandaMunicipio(data.porMunicipio);
   } catch (e) {
     renderDemandaNaoAtendidaErro(`Erro ao carregar (${e.message}).`);
   }
@@ -2160,6 +2108,52 @@ async function carregarSeguranca(token) {
   }
 }
 
+// ---- Acessos indevidos (aba Requests) ----
+// Visão por ROTA de classificarRotaSuspeita (admin.js) — complementar ao
+// "Sinalização" por IP que já existe na tabela "Requests por IP" acima
+// (mesmo classificador, eixo diferente: aqui é "qual caminho tentaram",
+// lá é "qual IP tentou"). Mesma janela do seletor #seguranca-janela.
+function renderAcessosIndevidos(data) {
+  document.getElementById('stat-acessos-indevidos-total').textContent = data.totalGeral ?? 0;
+  document.getElementById('stat-acessos-indevidos-ips').textContent = data.ipsDistintosGeral ?? 0;
+
+  const tbody = document.getElementById('acessos-indevidos-tbody');
+  if (!data.porRota || data.porRota.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Nenhum acesso indevido nesta janela. 🎉</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.porRota.map(r => `
+    <tr>
+      <td class="id-mono">${escaparHtml(r.rota)}</td>
+      <td>${escaparHtml(r.motivo)}</td>
+      <td>${r.total}</td>
+      <td>${r.ipsDistintos}</td>
+      <td class="last-seen">${formatarTempoRelativo(r.ultimaEm)}</td>
+    </tr>
+  `).join('');
+}
+
+function renderAcessosIndevidosErro(mensagem) {
+  document.getElementById('stat-acessos-indevidos-total').textContent = '—';
+  document.getElementById('stat-acessos-indevidos-ips').textContent = '—';
+  document.getElementById('acessos-indevidos-tbody').innerHTML = `<tr><td colspan="5" class="empty-state">${escaparHtml(mensagem)}</td></tr>`;
+}
+
+async function carregarAcessosIndevidos(token) {
+  try {
+    const minutos = obterJanelaSeguranca();
+    const res = await fetch(`${ENDPOINT_ACESSOS_INDEVIDOS}?minutos=${encodeURIComponent(minutos)}`, {
+      headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
+    });
+    if (res.status === 401) throw new Error('token inválido');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderAcessosIndevidos(data);
+  } catch (e) {
+    renderAcessosIndevidosErro(`Erro ao carregar (${e.message}).`);
+  }
+}
+
 (function initSelectSeguranca() {
   const select = document.getElementById('seguranca-janela');
   if (!select) return;
@@ -2176,7 +2170,10 @@ async function carregarSeguranca(token) {
       // sem persistência disponível nesta sessão, mas o filtro ainda aplica
     }
     const token = getToken();
-    if (token) carregarSeguranca(token);
+    if (token) {
+      carregarSeguranca(token);
+      carregarAcessosIndevidos(token);
+    }
   });
 })();
 
@@ -2269,10 +2266,6 @@ function ativarAba(nomeAba) {
   if (nomeAba === 'oferta-demanda') {
     if (mapaDensidade) mapaDensidade.invalidateSize();
     if (mapaDensidadeBuscas) mapaDensidadeBuscas.invalidateSize();
-    // Mesmo problema do Chart.js em redimensionarGraficosArea() (acima) —
-    // esse gráfico misto não é um "gráfico de área" e não vive no dict
-    // instanciasGraficoArea, então não é pego por aquela função.
-    if (instanciaGraficoDemandaMunicipio) instanciaGraficoDemandaMunicipio.resize();
   }
   if (nomeAba === 'visao-geral' && mapaDensidadeUsuarios) {
     mapaDensidadeUsuarios.invalidateSize();
@@ -2386,7 +2379,7 @@ async function load() {
   // segurança contra alguma dessas funções um dia esquecer de tratar o
   // próprio erro (regressão futura) — não deveria disparar no uso normal.
   try {
-    await Promise.all([carregarUsuarios(token), carregarRequests(token), carregarLocalizacao(token), carregarLogsCadastro(token), carregarGraficosTecnicos(token), carregarGraficosComercial(token), carregarInsights(token), carregarMapaPrestadores(token), carregarMapaBuscasSemResultado(token), carregarAlertas(token), carregarStatus(token), carregarSeguranca(token)]);
+    await Promise.all([carregarUsuarios(token), carregarRequests(token), carregarLocalizacao(token), carregarLogsCadastro(token), carregarGraficosTecnicos(token), carregarGraficosComercial(token), carregarInsights(token), carregarMapaPrestadores(token), carregarMapaBuscasSemResultado(token), carregarAlertas(token), carregarStatus(token), carregarSeguranca(token), carregarAcessosIndevidos(token)]);
   } catch (e) {
     console.error('Uma das abas não tratou o próprio erro internamente:', e);
   }
