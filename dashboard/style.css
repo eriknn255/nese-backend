@@ -374,6 +374,20 @@
   tbody tr:last-child td { border-bottom: none; }
   tbody tr:hover { background: var(--row-hover); }
 
+  /* Linha sinalizada em "Requests recentes" (ver classificarRotaSuspeita,
+     admin.js) — fundo bem sutil pra ficar escaneável na tabela sem
+     competir visualmente com o badge vermelho de erro (que já usa a
+     mesma cor --red com mais intensidade). Mantém o hover normal por
+     cima, só muda a cor de base da linha. */
+  tbody tr.linha-suspeita { background: color-mix(in srgb, var(--red) 7%, transparent); }
+  tbody tr.linha-suspeita:hover { background: color-mix(in srgb, var(--red) 14%, var(--row-hover)); }
+
+  .suspeita-marca {
+    color: var(--red);
+    cursor: help;
+    font-size: 11px;
+  }
+
   .user-cell { display: flex; align-items: center; gap: 8px; }
 
   .user-avatar {
@@ -926,15 +940,6 @@
     color: var(--muted);
     font-family: var(--font-mono);
     font-size: 10px;
-  }
-
-  /* Gráfico misto (barra + linha) de "Demanda não atendida por
-     município" — reusa a base de .area-chart (canvas via Chart.js), só
-     que mais alto: tem legenda de 2 séries + rótulos de município girados
-     no eixo X, então 200px (altura padrão de .area-chart) apertaria
-     demais. */
-  #chart-demanda-municipio {
-    height: 340px;
   }
 
   .bar-col {
