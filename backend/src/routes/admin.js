@@ -2187,4 +2187,259 @@ router.get("/dashboard/acessos-indevidos", exigirAdmin, (req, res) => {
     });
 });
 
+// ==========================================================================
+// MODERAÇÃO — CRUD administrativo total sobre usuarios/prestadores, pra
+// uma página separada (dashboard/moderacao.html), fora do dashboard de
+// métricas (só leitura). Mesmo token fixo (exigirAdmin/ADMIN_TOKEN) por
+// enquanto — ver comentário no topo do arquivo sobre não existir um
+// conceito de "usuário admin" no schema ainda.
+//
+// IRRESTRITO DE PROPÓSITO: ao contrário das rotas equivalentes em
+// usuarios.js/prestadores.js (exigirUsuario + checagem de dono), estas
+// não verificam posse — quem tem o ADMIN_TOKEN pode editar/excluir
+// QUALQUER conta ou prestador da plataforma. É a base pedida pra uma
+// tela de moderação; o "grosso" agora, refinamentos (motivo de edição,
+// log de auditoria de quem mudou o quê) ficam pra depois se precisar.
+// ==========================================================================
+
+const { sanitizarTexto: sanitizarTextoModeracao } = require("../utils/sanitizar");
+const { validarTelefone: validarTelefoneModeracao } = require("../utils/telefone");
+const { validarCpfCnpj, digitosCpfCnpj } = require("../utils/cpfCnpj");
+const { formatarPrestador, SELECT_PRESTADORES_COM_NOTA } = require("../utils/formatarPrestador");
+const BASE_UPLOADS_MODERACAO = path.join(__dirname, "../../storage");
+
+// mesma normalização de tag usada em prestadores.js (não exportada de lá,
+// duplicada aqui de propósito pra não acoplar os dois arquivos por causa
+// de uma função de 5 linhas)
+function normalizarTagModeracao(texto) {
+    return String(texto)
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
+}
+
+function normalizarDiasSemanaModeracao(diasSemana) {
+    if (!Array.isArray(diasSemana)) return [0, 1, 2, 3, 4, 5, 6];
+    const validos = [...new Set(diasSemana.filter(d => Number.isInteger(d) && d >= 0 && d <= 6))];
+    return validos.length > 0 ? validos : [0, 1, 2, 3, 4, 5, 6];
+}
+
+// GET /api/admin/moderacao/prestadores?busca=&limit=
+// Lista todos os prestadores (sem filtro de dono) com nome/email de quem
+// é dono, pra tela de moderação. ?busca= casa contra nome do prestador
+// (herdado da conta — ver formatarPrestador.js), categoria, ou nome/email
+// do dono; sem acento/maiúscula, mesmo padrão do resto do painel.
+router.get("/moderacao/prestadores", exigirAdmin, (req, res) => {
+    const limite = lerLimite(req, 200, 2000);
+    const busca = sanitizarTextoModeracao(req.query.busca, 100);
+
+    const linhas = db.prepare(`
+        SELECT
+            p.id, p.categoria, p.descricao, p.telefone, p.cor, p.lat, p.lng,
+            p.horario_abre AS horarioAbre, p.horario_fecha AS horarioFecha,
+            p.dias_semana AS diasSemana, p.tags, p.criado_em AS criadoEm,
+            p.dono_usuario_id AS donoUsuarioId,
+            u.nome AS donoNome, u.email AS donoEmail
+        FROM prestadores p
+        LEFT JOIN usuarios u ON u.id = p.dono_usuario_id
+        ORDER BY p.criado_em DESC
+        LIMIT ?
+    `).all(limite);
+
+    const filtrados = busca
+        ? linhas.filter(p => {
+            const alvo = normalizarTagModeracao(`${p.donoNome || ""} ${p.donoEmail || ""} ${p.categoria || ""}`);
+            return alvo.includes(normalizarTagModeracao(busca));
+        })
+        : linhas;
+
+    res.json({
+        prestadores: filtrados.map(p => ({
+            ...p,
+            nome: p.donoNome, // prestador não tem nome próprio — herdado do dono (ver formatarPrestador.js)
+            tags: p.tags ? JSON.parse(p.tags) : [],
+            diasSemana: p.diasSemana ? JSON.parse(p.diasSemana) : [0, 1, 2, 3, 4, 5, 6]
+        }))
+    });
+});
+
+// GET /api/admin/moderacao/prestadores/:id
+router.get("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
+    const linha = db.prepare(`
+        SELECT
+            p.*, u.nome AS donoNome, u.email AS donoEmail
+        FROM prestadores p
+        LEFT JOIN usuarios u ON u.id = p.dono_usuario_id
+        WHERE p.id = ?
+    `).get(req.params.id);
+
+    if (!linha) return res.status(404).json({ erro: "Prestador não encontrado." });
+
+    res.json({
+        ...linha,
+        nome: linha.donoNome,
+        tags: linha.tags ? JSON.parse(linha.tags) : [],
+        diasSemana: linha.dias_semana ? JSON.parse(linha.dias_semana) : [0, 1, 2, 3, 4, 5, 6]
+    });
+});
+
+// PATCH /api/admin/moderacao/prestadores/:id
+// Mesmos campos aceitos pelo PATCH do dono (ver routes/prestadores.js),
+// mas sem exigirDono — admin edita qualquer prestador. Campo omitido
+// preserva o valor atual (mesma regra de sempre neste projeto).
+router.patch("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
+    const atual = db.prepare("SELECT * FROM prestadores WHERE id = ?").get(req.params.id);
+    if (!atual) return res.status(404).json({ erro: "Prestador não encontrado." });
+
+    const categoria = req.body.categoria !== undefined ? sanitizarTextoModeracao(req.body.categoria, 60) : atual.categoria;
+    const descricao = req.body.descricao !== undefined ? (sanitizarTextoModeracao(req.body.descricao, 460) || null) : atual.descricao;
+    const telefone = req.body.telefone !== undefined ? sanitizarTextoModeracao(req.body.telefone, 30) : atual.telefone;
+    const cor = req.body.cor !== undefined ? (sanitizarTextoModeracao(req.body.cor, 30) || atual.cor) : atual.cor;
+    const lat = typeof req.body.lat === "number" ? req.body.lat : atual.lat;
+    const lng = typeof req.body.lng === "number" ? req.body.lng : atual.lng;
+    const horarioAbre = typeof req.body.horarioAbre === "number" ? req.body.horarioAbre : atual.horario_abre;
+    const horarioFecha = typeof req.body.horarioFecha === "number" ? req.body.horarioFecha : atual.horario_fecha;
+    const diasSemana = req.body.diasSemana !== undefined
+        ? normalizarDiasSemanaModeracao(req.body.diasSemana)
+        : (atual.dias_semana ? JSON.parse(atual.dias_semana) : [0, 1, 2, 3, 4, 5, 6]);
+
+    if (!categoria || !telefone || typeof lat !== "number" || typeof lng !== "number") {
+        return res.status(400).json({ erro: "categoria, telefone, lat e lng são obrigatórios." });
+    }
+    if (!validarTelefoneModeracao(telefone)) {
+        return res.status(400).json({ erro: "Telefone inválido. Use um número com DDD, ex: (86) 99999-9999." });
+    }
+
+    let tags;
+    if (req.body.tagsTexto !== undefined) {
+        tags = ["/all", normalizarTagModeracao(categoria)]
+            .concat(String(req.body.tagsTexto || "").split(",").map(t => sanitizarTextoModeracao(t, 30)).filter(Boolean));
+    } else {
+        const tagsAtuais = JSON.parse(atual.tags || "[]");
+        const categoriaAntigaNormalizada = normalizarTagModeracao(atual.categoria);
+        const extras = tagsAtuais.filter(t => t !== "/all" && t !== categoriaAntigaNormalizada);
+        tags = ["/all", normalizarTagModeracao(categoria), ...extras];
+    }
+
+    db.prepare(`
+        UPDATE prestadores
+        SET categoria = @categoria, descricao = @descricao, telefone = @telefone, cor = @cor, lat = @lat, lng = @lng,
+            horario_abre = @horario_abre, horario_fecha = @horario_fecha, dias_semana = @dias_semana, tags = @tags
+        WHERE id = @id
+    `).run({
+        id: req.params.id, categoria, descricao, telefone, cor, lat, lng,
+        horario_abre: horarioAbre, horario_fecha: horarioFecha,
+        dias_semana: JSON.stringify(diasSemana),
+        tags: JSON.stringify(tags)
+    });
+
+    const linha = db.prepare(`${SELECT_PRESTADORES_COM_NOTA} WHERE p.id = ? GROUP BY p.id`).get(req.params.id);
+    res.json(formatarPrestador(linha));
+});
+
+// DELETE /api/admin/moderacao/prestadores/:id — sem checagem de dono.
+router.delete("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
+    const linha = db.prepare("SELECT id FROM prestadores WHERE id = ?").get(req.params.id);
+    if (!linha) return res.status(404).json({ erro: "Prestador não encontrado." });
+
+    db.prepare("DELETE FROM prestadores WHERE id = ?").run(req.params.id);
+    res.status(204).end();
+});
+
+// PATCH /api/admin/moderacao/usuarios/:id
+// Edição irrestrita de conta — mesmos campos do PATCH do próprio usuário
+// (nome/telefone/cpfCnpj, ver routes/usuarios.js) mais email, que o dono
+// nunca pode editar sozinho (é herdado do Google no login). Checagem de
+// unicidade de email replicada aqui porque a coluna é UNIQUE no schema.
+router.patch("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
+    const atual = db.prepare("SELECT nome, email, telefone, cpf_cnpj FROM usuarios WHERE id = ?").get(req.params.id);
+    if (!atual) return res.status(404).json({ erro: "Usuário não encontrado." });
+
+    let nome = atual.nome;
+    if (req.body.nome !== undefined) {
+        nome = sanitizarTextoModeracao(req.body.nome, 80);
+        if (!nome) return res.status(400).json({ erro: "nome não pode ficar vazio." });
+    }
+
+    let email = atual.email;
+    if (req.body.email !== undefined) {
+        const emailBruto = sanitizarTextoModeracao(req.body.email, 190);
+        email = emailBruto || null;
+        if (email) {
+            const conflito = db.prepare("SELECT id FROM usuarios WHERE email = ? AND id != ?").get(email, req.params.id);
+            if (conflito) return res.status(400).json({ erro: "Já existe outra conta com esse e-mail." });
+        }
+    }
+
+    let telefone = atual.telefone;
+    if (req.body.telefone !== undefined) {
+        const telefoneBruto = sanitizarTextoModeracao(req.body.telefone, 30);
+        if (telefoneBruto && !validarTelefoneModeracao(telefoneBruto)) {
+            return res.status(400).json({ erro: "Telefone inválido. Use um número com DDD, ex: (86) 99999-9999." });
+        }
+        telefone = telefoneBruto || null;
+    }
+
+    let cpfCnpj = atual.cpf_cnpj;
+    if (req.body.cpfCnpj !== undefined) {
+        const cpfCnpjBruto = sanitizarTextoModeracao(req.body.cpfCnpj, 20);
+        if (cpfCnpjBruto && !validarCpfCnpj(cpfCnpjBruto)) {
+            return res.status(400).json({ erro: "CPF/CNPJ inválido. Use 11 dígitos (CPF) ou 14 (CNPJ)." });
+        }
+        cpfCnpj = cpfCnpjBruto ? digitosCpfCnpj(cpfCnpjBruto) : null;
+    }
+
+    db.prepare("UPDATE usuarios SET nome = ?, email = ?, telefone = ?, cpf_cnpj = ? WHERE id = ?")
+        .run(nome, email, telefone, cpfCnpj, req.params.id);
+
+    const atualizado = db.prepare(`
+        SELECT id, nome, email, telefone, cpf_cnpj AS cpfCnpj, avatar_url AS avatarUrl, criado_em AS criadoEm
+        FROM usuarios WHERE id = ?
+    `).get(req.params.id);
+    res.json(atualizado);
+});
+
+// DELETE /api/admin/moderacao/usuarios/:id
+// Mesma cascata/transação de DELETE /api/usuarios/:id (autoexclusão), só
+// que sem exigir que seja a própria conta — ver comentário lá pra
+// detalhe de cada passo (ordem de FK, auditoria_contas, limpeza de
+// arquivo fora da transação).
+router.delete("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
+    const usuario = db.prepare("SELECT criado_em FROM usuarios WHERE id = ?").get(req.params.id);
+    if (!usuario) return res.status(404).json({ erro: "Conta não encontrada." });
+
+    const excluirTransacao = db.transaction((usuarioId) => {
+        db.prepare("DELETE FROM avaliacoes WHERE autor_usuario_id = ?").run(usuarioId);
+        db.prepare("DELETE FROM cliques_whatsapp WHERE usuario_id = ?").run(usuarioId);
+        db.prepare("DELETE FROM salvos WHERE usuario_id = ?").run(usuarioId);
+        db.prepare("DELETE FROM notificacoes WHERE usuario_id = ?").run(usuarioId);
+        db.prepare("DELETE FROM prestadores WHERE dono_usuario_id = ?").run(usuarioId);
+
+        db.prepare(`
+            INSERT INTO auditoria_contas (usuario_id, criado_em, excluido_em)
+            VALUES (?, ?, ?)
+        `).run(usuarioId, usuario.criado_em, Date.now());
+
+        db.prepare("DELETE FROM usuarios WHERE id = ?").run(usuarioId);
+    });
+
+    try {
+        excluirTransacao(req.params.id);
+    } catch (erro) {
+        console.error("Falha ao excluir conta (moderação):", erro);
+        return res.status(500).json({ erro: "Não foi possível excluir a conta agora. Tente de novo em instantes." });
+    }
+
+    fs.rm(path.join(BASE_UPLOADS_MODERACAO, req.params.id), { recursive: true, force: true }, () => {});
+    fs.readdir(BASE_UPLOADS_MODERACAO, (erro, entradas) => {
+        if (erro) return;
+        entradas
+            .filter(nome => nome.startsWith(`${req.params.id}-p-`))
+            .forEach(nome => fs.rm(path.join(BASE_UPLOADS_MODERACAO, nome), { recursive: true, force: true }, () => {}));
+    });
+
+    res.status(204).end();
+});
+
 module.exports = router;
