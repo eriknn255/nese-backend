@@ -1100,7 +1100,7 @@ function renderModalErrosHoje(data) {
   `).join('');
 
   const notaLimite = data.temMais
-    ? `<div class="modal-subsection-title">Mostrando os ${data.erros.length} mais recentes de ${data.total} — refine por rota na aba "Requests" pra ver o resto.</div>`
+    ? `<div class="modal-subsection-title">Mostrando os ${data.erros.length} mais recentes de ${data.total}.</div>`
     : '';
 
   document.getElementById('modal-body').innerHTML = `
