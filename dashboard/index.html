@@ -173,10 +173,10 @@
         </div>
       </div>
 
-      <div class="section-title">Processo</div>
+      /* -- <div class="section-title">Processo</div> -- */
       <div class="stats-row">
         <div class="stat-card">
-          <div class="stat-label">No ar há</div>
+          <div class="stat-label">Uptime</div>
           <div class="stat-value blue" id="status-uptime">—</div>
         </div>
         <div class="stat-card">
@@ -220,7 +220,7 @@
         <div class="bar-chart bar-chart-horizontal" id="status-tabelas"><div class="empty-state">carregando…</div></div>
       </div>
 
-      <div class="section-title">Jobs de background <span class="section-note">(trabalho pendente agora, não indica se o job está rodando)</span></div>
+      <div class="section-title">Jobs de background <span class="section-note">(trabalhos pendentes)</span></div>
       <div class="stats-row">
         <div class="stat-card">
           <div class="stat-label">Prestadores p/ geocodificar</div>
@@ -249,7 +249,7 @@
          routes/admin.js). -->
     <section class="aba-conteudo" id="aba-alertas" hidden>
       <div class="section-title section-title-com-acoes">
-        <span>Alertas <span class="section-note">(sinais técnicos que cruzaram um limiar de atenção — não é uma lista de tudo que existe)</span></span>
+        <span>Alertas</span>
         <button type="button" id="alertas-limpar-btn" class="toolbar-btn">Limpar</button>
       </div>
       <div class="alertas-lista" id="alertas-lista"><div class="empty-state">carregando…</div></div>
@@ -338,7 +338,7 @@
          mesmo valor), mas mudar um não obriga a pessoa a estar na mesma
          aba do outro pra decidir a janela de tempo. -->
     <section class="aba-conteudo" id="aba-seguranca" hidden>
-      <div class="section-title">Segurança <span class="section-note">(leituras derivadas do mesmo sinal de "Requests por IP", na aba Requests)</span></div>
+      <div class="section-title">Segurança </div>
       <div class="table-toolbar">
         <label for="seguranca-janela-2" class="table-toolbar-label">Janela</label>
         <select id="seguranca-janela-2">
@@ -349,10 +349,10 @@
         </select>
       </div>
 
-      <div class="section-title">Acessos indevidos <span class="section-note">(caminhos fora do que o app expõe — arquivo interno, painel de outra stack, varredura, token de admin errado — agrupados por rota)</span></div>
+      <div class="section-title">Requests Suspeitos <span class="section-note">(caminhos fora do que o app expõe — arquivo interno, painel de outra stack, varredura, token de admin errado — agrupados por rota)</span></div>
       <div class="stats-row">
         <div class="stat-card">
-          <div class="stat-label">Acessos indevidos na janela</div>
+          <div class="stat-label">Total de Requisições</div>
           <div class="stat-value red" id="stat-acessos-indevidos-total">—</div>
         </div>
         <div class="stat-card">
@@ -377,7 +377,7 @@
         </table>
       </div>
 
-      <div class="section-title">Concentração por região <span class="section-note">(só entre os IPs listados em "Requests por IP", geolocalizados sob demanda)</span></div>
+      <div class="section-title">Concentração por região</div>
       <div class="chart-card">
         <div class="bar-chart bar-chart-horizontal" id="seguranca-por-regiao"><div class="empty-state">carregando…</div></div>
       </div>
@@ -418,7 +418,7 @@
          sem atender (buscas sem resultado), lado a lado pra comparação
          visual direta. -->
     <section class="aba-conteudo" id="aba-oferta-demanda" hidden>
-      <div class="section-title">Oferta &amp; Demanda <span class="section-note">(onde tem serviço oferecido e onde a demanda esbarrou em nada — comparados lado a lado)</span></div>
+      <div class="section-title">Oferta &amp; Demanda</div>
 
       <div class="mapas-lado-a-lado">
         <div class="chart-card">
@@ -557,7 +557,7 @@
       </div>
 
       <div class="section-title section-title-com-acoes">
-        <span>Cadastros por dia <span class="section-note">(janela selecionável)</span></span>
+        <span>Cadastros por dia</span>
         <div class="periodo-seletor" id="cadastros-periodo-seletor" role="group" aria-label="Período do gráfico de cadastros">
           <button type="button" data-dias="7">7d</button>
           <button type="button" data-dias="14" class="active">14d</button>
