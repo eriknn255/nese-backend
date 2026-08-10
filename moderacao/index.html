@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Nese — Moderação</title>
-<link rel="stylesheet" href="/dashboard/style.css">
+<link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/google-sans-flex/wght.css">
 <link rel="icon" type="image/png" href="/dashboard/img/logo-nese.png">
 </head>
@@ -16,9 +16,10 @@
      prestadores (ver PATCH/DELETE /api/admin/moderacao/* em admin.js) —
      mesmo ADMIN_TOKEN do dashboard, reaproveitado do mesmo localStorage
      (ver TOKEN_KEY em moderacao.js, tem que bater com o de script.js).
-     Base inicial ("o grosso"): listar + editar campos + excluir, em
-     usuários e prestadores. Sem paginação de servidor, sem log de quem
-     mudou o quê — ver comentário equivalente em admin.js.
+     Base: listar + editar campos + excluir, em usuários e prestadores,
+     com log de auditoria de quem mudou o quê (ver aba "Log de auditoria"
+     e GET /api/admin/moderacao/log em admin.js). Sem paginação de
+     servidor além do limit simples de sempre.
      ========================================================================== -->
 <div class="app-shell">
   <nav class="sidebar" id="sidebar">
@@ -32,6 +33,9 @@
     </button>
     <button type="button" class="sidebar-link" data-aba="prestadores" title="Prestadores">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Prestadores</span>
+    </button>
+    <button type="button" class="sidebar-link" data-aba="log" title="Log de auditoria">
+      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Log de auditoria</span>
     </button>
 
     <div class="sidebar-spacer"></div>
@@ -60,6 +64,8 @@
       <label class="remember-label">
         <input type="checkbox" id="remember-token"> Lembrar neste navegador
       </label>
+      <label for="admin-nome">Seu nome</label>
+      <input type="text" id="admin-nome" placeholder="Pra identificar você no log de auditoria" autocomplete="off" style="min-width:180px;">
       <button id="token-save-btn" type="button">Salvar</button>
     </div>
 
@@ -103,6 +109,28 @@
           </tr>
         </thead>
         <tbody id="prestadores-tbody">
+          <tr><td colspan="5" class="empty-state">carregando…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ==================== ABA: LOG DE AUDITORIA ==================== -->
+    <section class="aba-conteudo" id="aba-log" hidden>
+      <div class="section-title">Log de auditoria <span class="section-note">(toda edição/exclusão feita nesta tela, mais recente primeiro)</span></div>
+      <div class="table-toolbar">
+        <input type="search" id="log-busca" class="table-busca" placeholder="Buscar por moderador ou ID da entidade…">
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Quando</th>
+            <th>Moderador</th>
+            <th>Ação</th>
+            <th>Entidade</th>
+            <th>O que mudou</th>
+          </tr>
+        </thead>
+        <tbody id="log-tbody">
           <tr><td colspan="5" class="empty-state">carregando…</td></tr>
         </tbody>
       </table>
