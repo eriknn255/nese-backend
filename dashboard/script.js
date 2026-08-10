@@ -259,7 +259,7 @@ function renderUsuarios(usuarios) {
   const tbody = document.getElementById('usuarios-tbody');
 
   if (!usuarios || usuarios.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Nenhum usuário cadastrado ainda.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Nenhum usuário ativado ainda.</td></tr>';
     return;
   }
 
@@ -490,7 +490,7 @@ function renderLogsCadastro(logs) {
 
   comScrollPreservado(painel, () => {
     if (!logs || logs.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhum cadastro bate com o que está carregado/buscado.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhuma ativação bate com o que está carregado/buscado.</td></tr>';
       return;
     }
 
@@ -554,7 +554,7 @@ async function carregarLogsCadastro(token) {
     logsCadastroCarregarMaisBtn.hidden = !data.temMais;
     aplicarFiltroLogsCadastro();
   } catch (e) {
-    renderLogsCadastroErro(`Erro ao carregar logs de cadastro (${e.message}).`);
+    renderLogsCadastroErro(`Erro ao carregar logs de ativação (${e.message}).`);
   }
 }
 
@@ -678,7 +678,7 @@ function redimensionarGraficosArea() {
 let ultimoCadastrosPorDia = null;
 
 function formatarTooltipCadastros(valor) {
-  return `${valor} cadastro${valor === 1 ? '' : 's'}`;
+  return `${valor} ${valor === 1 ? 'ativação' : 'ativações'}`;
 }
 
 // diasCadastros: janela ativa do gráfico "Cadastros por dia" (7/14/30),
@@ -691,7 +691,7 @@ function renderGraficoCadastrosPorDia(linhas) {
   ultimoCadastrosPorDia = linhas;
 
   if (!linhas || linhas.length === 0) {
-    renderGraficoErro('chart-cadastros-dia', `Nenhum cadastro nos últimos ${diasCadastros} dias.`);
+    renderGraficoErro('chart-cadastros-dia', `Nenhuma ativação nos últimos ${diasCadastros} dias.`);
     return;
   }
 
@@ -808,14 +808,14 @@ function renderGraficoUsuariosAtivosPorHora(linhas) {
 
 function renderGraficoCadastrosPorHora(linhas) {
   if (!linhas || linhas.length === 0) {
-    renderGraficoErro('chart-cadastros-hora', 'Nenhum cadastro nas últimas 24h.');
+    renderGraficoErro('chart-cadastros-hora', 'Nenhuma ativação nas últimas 24h.');
     return;
   }
   renderGraficoArea('chart-cadastros-hora', {
     labels: linhas.map(l => formatarRotuloHora(l.hora)),
     valores: linhas.map(l => l.total),
     cor: '--teal',
-    formatarTooltip: formatarTooltipContagem('cadastro', 'cadastros')
+    formatarTooltip: formatarTooltipContagem('ativação', 'ativações')
   });
 }
 
@@ -1028,9 +1028,9 @@ function renderModal(data) {
       <div><div class="modal-field-label">CPF/CNPJ</div><div class="modal-field-value">${escaparHtml(u.cpfCnpj || '—')}</div></div>
       <div><div class="modal-field-label">Criado em</div><div class="modal-field-value">${formatarDataExata(u.criadoEm)}</div></div>
       <div><div class="modal-field-label">Última atividade</div><div class="modal-field-value">${formatarDataExata(u.lastSeenAt)}</div></div>
-      <div><div class="modal-field-label">Localização (cadastro)</div><div class="modal-field-value">${escaparHtml(localizacaoTexto)}</div></div>
-      <div><div class="modal-field-label">IP do cadastro</div><div class="modal-field-value">${escaparHtml(data.cadastro?.ip || '—')}</div></div>
-      <div><div class="modal-field-label">Porta do cadastro</div><div class="modal-field-value">${data.cadastro?.porta != null ? data.cadastro.porta : '—'}</div></div>
+      <div><div class="modal-field-label">Localização (ativação)</div><div class="modal-field-value">${escaparHtml(localizacaoTexto)}</div></div>
+      <div><div class="modal-field-label">IP da ativação</div><div class="modal-field-value">${escaparHtml(data.cadastro?.ip || '—')}</div></div>
+      <div><div class="modal-field-label">Porta da ativação</div><div class="modal-field-value">${data.cadastro?.porta != null ? data.cadastro.porta : '—'}</div></div>
       <div><div class="modal-field-label">Avaliações feitas</div><div class="modal-field-value">${data.atividade.totalAvaliacoesFeitas}</div></div>
       <div><div class="modal-field-label">Prestadores salvos</div><div class="modal-field-value">${data.atividade.totalSalvos}</div></div>
       <div><div class="modal-field-label">Notificações não lidas</div><div class="modal-field-value">${data.atividade.notificacoesNaoLidas}</div></div>
@@ -1161,7 +1161,7 @@ const LIMITE_ERROS_HOJE_MODAL = 200;
 function renderTabelaRetencao(coortes) {
   const container = document.getElementById('tabela-retencao');
   if (!coortes || coortes.length === 0) {
-    container.innerHTML = '<div class="empty-state">Nenhum cadastro na janela analisada.</div>';
+    container.innerHTML = '<div class="empty-state">Nenhuma ativação na janela analisada.</div>';
     return;
   }
   const maxSemana = Math.max(...coortes.map(c => c.pontos.length - 1), 0);
@@ -1903,7 +1903,7 @@ const RATULOS_TABELAS_STATUS = {
   avaliacoes: 'Avaliações',
   notificacoes: 'Notificações',
   requestLogs: 'Request logs',
-  logCadastros: 'Logs de cadastro',
+  logCadastros: 'Logs de ativação',
   buscasSemResultado: 'Buscas sem resultado',
   cliquesWhatsapp: 'Cliques WhatsApp',
   salvos: 'Salvos'
@@ -2248,7 +2248,7 @@ const TITULOS_ABA = {
   'oferta-demanda': 'Oferta & Demanda',
   'graficos-tecnico': 'Gráficos técnicos',
   'graficos-comercial': 'Gráficos comerciais',
-  'logs-cadastro': 'Logs de cadastro',
+  'logs-cadastro': 'Logs de ativação',
   'requests': 'Requests',
   'retencao': 'Retenção & Ativação',
   'avaliacoes': 'Avaliações'
