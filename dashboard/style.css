@@ -535,57 +535,6 @@
   #token-save-btn:active { transform: scale(0.96); }
   #token-save-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 
-  .loc-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 12px;
-    margin-bottom: 28px;
-  }
-
-  .loc-card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 12px 14px;
-  }
-
-  .loc-card-title {
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    color: var(--muted);
-    margin-bottom: 8px;
-  }
-
-  .loc-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: 160px;
-    overflow-y: auto;
-  }
-
-  .loc-list li {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    font-size: 12.5px;
-  }
-
-  .loc-list li span.loc-total {
-    font-family: var(--font-mono);
-    color: var(--gold);
-    font-weight: 600;
-  }
-
-  .loc-list li.empty-state {
-    padding: 4px 0;
-    display: block;
-  }
-
   /* ==========================================================================
      App shell — sidebar fixa a esquerda + area principal rolavel. Layout
      em duas colunas via flex; sidebar tem largura fixa, main-area ocupa o
@@ -907,9 +856,9 @@
   .area-chart .empty-state { margin: auto; }
 
   #mapa-densidade-prestadores,
-  #mapa-densidade-usuarios {
+  #mapa-densidade-usuarios,
+  #mapa-densidade-buscas {
     position: relative;
-    height: 620px;
     border-radius: 24px;
     overflow: hidden;
     /* Contém o stacking context do Leaflet aqui dentro — sem isso, os
@@ -919,8 +868,42 @@
     isolation: isolate;
   }
 
+  /* Sozinho na aba "Visão geral", o mapa de usuários ocupa a largura
+     inteira do painel — mantém a altura generosa original. Prestadores e
+     buscas sem resultado, na aba "Oferta & Demanda", dividem a largura
+     lado a lado (ver .mapas-lado-a-lado) — cada um fica mais baixo pra
+     não empurrar o resto da aba pra muito longe do topo. */
+  #mapa-densidade-usuarios {
+    height: 620px;
+  }
+
+  .mapas-lado-a-lado #mapa-densidade-prestadores,
+  .mapas-lado-a-lado #mapa-densidade-buscas {
+    height: 460px;
+  }
+
+  .mapas-lado-a-lado {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .mapas-lado-a-lado .chart-card {
+    margin-bottom: 0;
+  }
+
+  .mapa-subtitulo {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
   #mapa-densidade-prestadores .empty-state,
-  #mapa-densidade-usuarios .empty-state {
+  #mapa-densidade-usuarios .empty-state,
+  #mapa-densidade-buscas .empty-state {
     position: absolute;
     inset: 0;
     display: flex;
@@ -929,18 +912,29 @@
   }
 
   #mapa-densidade-prestadores .leaflet-control-zoom a,
-  #mapa-densidade-usuarios .leaflet-control-zoom a {
+  #mapa-densidade-usuarios .leaflet-control-zoom a,
+  #mapa-densidade-buscas .leaflet-control-zoom a {
     background: var(--panel);
     color: var(--ink);
     border-color: var(--border);
   }
 
   #mapa-densidade-prestadores .leaflet-control-attribution,
-  #mapa-densidade-usuarios .leaflet-control-attribution {
+  #mapa-densidade-usuarios .leaflet-control-attribution,
+  #mapa-densidade-buscas .leaflet-control-attribution {
     background: var(--panel);
     color: var(--muted);
     font-family: var(--font-mono);
     font-size: 10px;
+  }
+
+  /* Gráfico misto (barra + linha) de "Demanda não atendida por
+     município" — reusa a base de .area-chart (canvas via Chart.js), só
+     que mais alto: tem legenda de 2 séries + rótulos de município girados
+     no eixo X, então 200px (altura padrão de .area-chart) apertaria
+     demais. */
+  #chart-demanda-municipio {
+    height: 340px;
   }
 
   .bar-col {
