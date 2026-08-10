@@ -1019,7 +1019,20 @@ router.get("/dashboard/funil", exigirAdmin, (req, res) => {
         totalUsuarios,
         primeiroServico: etapa("prestadores", "dono_usuario_id"),
         primeiraAvaliacao: etapa("avaliacoes", "autor_usuario_id"),
-        primeiroSalvo: etapa("salvos", "usuario_id")
+        primeiroSalvo: etapa("salvos", "usuario_id"),
+        // Clique no WhatsApp é o sinal de ativação mais forte que já
+        // existe no app hoje — intenção explícita de contato, mais direto
+        // que só salvar ou avaliar. Mesma ressalva do PRIMARY KEY
+        // (prestador_id, usuario_id) com ON CONFLICT...DO UPDATE em
+        // cliques_whatsapp (ver POST /prestadores/:id/whatsapp-clique,
+        // routes/avaliacoes.js): se a pessoa reclicar no MESMO prestador
+        // depois, o criado_em daquela linha é sobrescrito com o clique
+        // mais recente — então MIN(criado_em) aqui só deixa de ser o
+        // primeiro clique de verdade no caso (raro) de alguém que só
+        // clicou repetidas vezes no mesmo prestador e nunca em nenhum
+        // outro. Não afeta quem clicou em prestadores diferentes ao
+        // longo do tempo.
+        primeiroCliqueWhatsapp: etapa("cliques_whatsapp", "usuario_id")
     });
 });
 
