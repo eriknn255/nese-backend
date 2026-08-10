@@ -2086,12 +2086,23 @@ function renderSegurancaErro(mensagem) {
 
 // Janela de tempo lida do <select> — persistida em localStorage (mesmo
 // padrão de refresh-interval-select) pra sobreviver a um refresh de
-// página sem voltar pro padrão de 15min toda vez.
+// página sem voltar pro padrão de 15min toda vez. Dois <select>s na tela
+// agora (um na aba "Requests", outro na aba "Segurança" — ver
+// initSelectsJanela mais abaixo), sempre sincronizados entre si; a fonte
+// de verdade é o localStorage, não um dos dois elementos.
 const SEGURANCA_JANELA_KEY = 'mase-seguranca-janela-minutos';
+const IDS_SELECT_JANELA = ['seguranca-janela', 'seguranca-janela-2'];
 
 function obterJanelaSeguranca() {
-  const select = document.getElementById('seguranca-janela');
-  return select ? select.value : '15';
+  try {
+    return localStorage.getItem(SEGURANCA_JANELA_KEY) || '15';
+  } catch (e) {
+    // localStorage indisponível nesta sessão — cai pro padrão (15min); se
+    // algum dos selects já estiver com outro valor selecionado na tela,
+    // prefere esse em vez do padrão fixo.
+    const selectNaTela = IDS_SELECT_JANELA.map(id => document.getElementById(id)).find(Boolean);
+    return selectNaTela ? selectNaTela.value : '15';
+  }
 }
 
 async function carregarSeguranca(token) {
@@ -2155,26 +2166,33 @@ async function carregarAcessosIndevidos(token) {
   }
 }
 
-(function initSelectSeguranca() {
-  const select = document.getElementById('seguranca-janela');
-  if (!select) return;
-  try {
-    const salvo = localStorage.getItem(SEGURANCA_JANELA_KEY);
-    if (salvo) select.value = salvo;
-  } catch (e) {
-    // localStorage indisponível nesta sessão — segue com o padrão (15min)
-  }
-  select.addEventListener('change', () => {
-    try {
-      localStorage.setItem(SEGURANCA_JANELA_KEY, select.value);
-    } catch (e) {
-      // sem persistência disponível nesta sessão, mas o filtro ainda aplica
-    }
-    const token = getToken();
-    if (token) {
-      carregarSeguranca(token);
-      carregarAcessosIndevidos(token);
-    }
+(function initSelectsJanela() {
+  const selects = IDS_SELECT_JANELA
+    .map(id => document.getElementById(id))
+    .filter(Boolean);
+  if (selects.length === 0) return;
+
+  const valorInicial = obterJanelaSeguranca();
+  selects.forEach(select => { select.value = valorInicial; });
+
+  selects.forEach(select => {
+    select.addEventListener('change', () => {
+      try {
+        localStorage.setItem(SEGURANCA_JANELA_KEY, select.value);
+      } catch (e) {
+        // sem persistência disponível nesta sessão, mas o filtro ainda aplica
+      }
+      // Mantém o outro seletor mostrando o mesmo valor — evita a aba
+      // "Requests" e a aba "Segurança" discordarem sobre qual janela está
+      // ativa quando a pessoa alterna entre as duas.
+      selects.forEach(outro => { if (outro !== select) outro.value = select.value; });
+
+      const token = getToken();
+      if (token) {
+        carregarSeguranca(token);
+        carregarAcessosIndevidos(token);
+      }
+    });
   });
 })();
 
