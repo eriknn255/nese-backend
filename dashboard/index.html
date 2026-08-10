@@ -327,6 +327,34 @@
           </tbody>
         </table>
       </div>
+
+      <div class="section-title">Acessos indevidos <span class="section-note">(caminhos fora do que o app expõe — arquivo interno, painel de outra stack, varredura — agrupados por rota; mesma janela selecionada acima)</span></div>
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-label">Acessos indevidos na janela</div>
+          <div class="stat-value red" id="stat-acessos-indevidos-total">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">IPs distintos</div>
+          <div class="stat-value" id="stat-acessos-indevidos-ips">—</div>
+        </div>
+      </div>
+      <div class="requests-panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Rota</th>
+              <th>Motivo</th>
+              <th>Total</th>
+              <th>IPs distintos</th>
+              <th>Última vez</th>
+            </tr>
+          </thead>
+          <tbody id="acessos-indevidos-tbody">
+            <tr><td colspan="5" class="empty-state">carregando…</td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <!-- ==================== ABA: USUÁRIOS ==================== -->
@@ -391,10 +419,36 @@
         </tbody>
       </table>
 
-      <div class="section-title">Demanda não atendida por município <span class="section-note">(barra = buscas sem resultado no município; linha = quantas categorias diferentes têm gap de oferta E busca confirmando — passe o mouse pro detalhe por nível)</span></div>
+      <!-- As duas métricas (volume de busca sem resultado e categorias
+           com gap confirmado) não compartilham escala nem unidade — um
+           gráfico de eixo duplo (barra+linha) tentando juntar as duas
+           obrigava a pessoa a "traduzir" mentalmente dois eixos ao mesmo
+           tempo pra ler qualquer linha. Separado em dois elementos
+           simples (mesmo padrão do resto do painel: bar-chart horizontal
+           + tabela) cada um se lê sozinho, na ordem: primeiro ONDE tem
+           mais volume de frustração, depois ONDE isso já foi confirmado
+           por um gap de oferta de verdade. Mesmo dado (porMunicipio, ver
+           GET /dashboard/demanda-nao-atendida em admin.js), duas leituras. -->
+      <div class="section-title">Volume de busca sem resultado por município</div>
       <div class="chart-card">
-        <div class="area-chart" id="chart-demanda-municipio"><div class="empty-state">carregando…</div></div>
+        <div class="bar-chart bar-chart-horizontal" id="chart-demanda-municipio-volume"><div class="empty-state">carregando…</div></div>
       </div>
+
+      <div class="section-title">Municípios com gap de oferta confirmado <span class="section-note">("confirmadas" = tem gap de oferta E gente buscou; "observadas" = só busca sem resultado, sem gap; "inferidas" = só o gap teórico, ninguém buscou ainda)</span></div>
+      <table>
+        <thead>
+          <tr>
+            <th>Município</th>
+            <th>Confirmadas</th>
+            <th>Observadas</th>
+            <th>Inferidas</th>
+            <th>Buscas sem resultado</th>
+          </tr>
+        </thead>
+        <tbody id="demanda-municipio-tbody">
+          <tr><td colspan="5" class="empty-state">carregando…</td></tr>
+        </tbody>
+      </table>
     </section>
 
     <!-- ==================== ABA: GRÁFICOS TÉCNICOS ==================== -->
