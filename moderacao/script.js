@@ -12,6 +12,7 @@ const ENDPOINT_USUARIOS = `${BASE_API}/dashboard/usuarios`;
 const ENDPOINT_USUARIO_DETALHE_BASE = `${BASE_API}/dashboard/usuarios/`;
 const ENDPOINT_MODERACAO_USUARIOS = `${BASE_API}/moderacao/usuarios/`;
 const ENDPOINT_MODERACAO_PRESTADORES = `${BASE_API}/moderacao/prestadores`;
+const ENDPOINT_MODERACAO_LOG = `${BASE_API}/moderacao/log`;
 
 // Mesma origem do backend, pra resolver avatar customizado (caminho
 // relativo) — mesmo raciocínio de resolverAvatarUrl em script.js.
@@ -36,6 +37,32 @@ function getToken() {
   }
 }
 
+// ---- Nome do moderador (identifica quem mexeu, pro log de auditoria —
+// ver nomeModerador em admin.js). Mesmo padrão de persistência do token,
+// chave própria: não precisa do "lembrar neste navegador" do token porque
+// não é segredo nenhum, só um rótulo. ----
+const NOME_KEY = 'mase-admin-nome';
+
+function getNomeModerador() {
+  const campo = document.getElementById('admin-nome').value.trim();
+  if (campo) return campo;
+  try {
+    return localStorage.getItem(NOME_KEY) || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function initNomeField() {
+  let saved = '';
+  try {
+    saved = localStorage.getItem(NOME_KEY) || '';
+  } catch (e) {
+    // localStorage indisponível nesta sessão — segue sem preencher
+  }
+  if (saved) document.getElementById('admin-nome').value = saved;
+}
+
 function initTokenField() {
   let saved = '';
   try {
@@ -52,11 +79,17 @@ function initTokenField() {
 document.getElementById('token-save-btn').addEventListener('click', () => {
   const lembrar = document.getElementById('remember-token').checked;
   const valor = document.getElementById('admin-token').value.trim();
+  const nome = document.getElementById('admin-nome').value.trim();
   try {
     if (lembrar && valor) {
       localStorage.setItem(TOKEN_KEY, valor);
     } else {
       localStorage.removeItem(TOKEN_KEY);
+    }
+    if (nome) {
+      localStorage.setItem(NOME_KEY, nome);
+    } else {
+      localStorage.removeItem(NOME_KEY);
     }
   } catch (e) {
     // sem persistência disponível nesta sessão
@@ -105,10 +138,12 @@ async function chamarApi(url, opcoes = {}) {
   if (!token) {
     throw new Error('Preencha o token de admin acima pra carregar.');
   }
+  const nomeModerador = getNomeModerador();
   const res = await fetch(url, {
     ...opcoes,
     headers: {
       'X-Admin-Token': token,
+      ...(nomeModerador ? { 'X-Admin-Nome': nomeModerador } : {}),
       ...(opcoes.body ? { 'Content-Type': 'application/json' } : {}),
       ...(opcoes.headers || {})
     }
@@ -128,7 +163,8 @@ async function chamarApi(url, opcoes = {}) {
 
 const TITULOS_ABA = {
   usuarios: 'Usuários',
-  prestadores: 'Prestadores'
+  prestadores: 'Prestadores',
+  log: 'Log de auditoria'
 };
 
 function ativarAba(aba) {
@@ -156,6 +192,7 @@ function carregarAbaAtiva() {
   const aba = abaAtiva();
   if (aba === 'usuarios') carregarUsuarios();
   if (aba === 'prestadores') carregarPrestadores();
+  if (aba === 'log') carregarLog();
 }
 
 // ==========================================================================
@@ -266,6 +303,11 @@ async function abrirEdicaoUsuario(id) {
           </div>
         `).join('') : '<div class="empty-state">Nenhum serviço cadastrado.</div>'}
 
+        <div class="modal-subsection-title">Histórico desta conta</div>
+        <div id="historico-usuario">
+          <div class="empty-state" style="padding:14px 0;">carregando…</div>
+        </div>
+
         <div id="form-usuario-erro" class="empty-state" style="color: var(--red); display:none;"></div>
 
         <div style="display:flex; justify-content:space-between; gap:8px; margin-top:16px;">
@@ -274,6 +316,11 @@ async function abrirEdicaoUsuario(id) {
         </div>
       </form>
     `;
+
+    buscarHistoricoEntidadeHtml('usuario', id).then(html => {
+      const alvo = document.getElementById('historico-usuario');
+      if (alvo) alvo.innerHTML = html;
+    });
 
     corpo.querySelectorAll('[data-ir-prestador]').forEach(a => {
       a.addEventListener('click', (ev) => {
@@ -458,6 +505,11 @@ async function abrirEdicaoPrestador(id) {
           </div>
         </div>
 
+        <div class="modal-subsection-title">Histórico deste prestador</div>
+        <div id="historico-prestador">
+          <div class="empty-state" style="padding:14px 0;">carregando…</div>
+        </div>
+
         <div id="form-prestador-erro" class="empty-state" style="color: var(--red); display:none;"></div>
 
         <div style="display:flex; justify-content:space-between; gap:8px; margin-top:16px;">
@@ -466,6 +518,11 @@ async function abrirEdicaoPrestador(id) {
         </div>
       </form>
     `;
+
+    buscarHistoricoEntidadeHtml('prestador', id).then(html => {
+      const alvo = document.getElementById('historico-prestador');
+      if (alvo) alvo.innerHTML = html;
+    });
 
     document.getElementById('form-editar-prestador').addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -531,6 +588,109 @@ function normalizarTagLocal(texto) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
+}
+
+// ==========================================================================
+// LOG DE AUDITORIA — lista geral (ver GET /moderacao/log em admin.js).
+// Cada linha resume um PATCH ou DELETE feito nesta tela: quem, quando,
+// em qual entidade, e o diff (ou snapshot, no caso de exclusão).
+// ==========================================================================
+
+let logListaCompleta = [];
+
+const LABELS_CAMPO = {
+  categoria: 'categoria', descricao: 'descrição', telefone: 'telefone', cor: 'cor',
+  lat: 'latitude', lng: 'longitude', horarioAbre: 'horário de abertura', horarioFecha: 'horário de fechamento',
+  diasSemana: 'dias da semana', tags: 'tags',
+  nome: 'nome', email: 'e-mail', cpfCnpj: 'CPF/CNPJ'
+};
+
+function formatarValorLog(valor) {
+  if (valor === null || valor === undefined) return '—';
+  if (Array.isArray(valor)) return valor.length ? valor.join(', ') : '—';
+  return String(valor);
+}
+
+function formatarAlteracoesLog(entrada) {
+  if (!entrada.alteracoes) return '—';
+  if (entrada.acao === 'excluir') {
+    // snapshot completo (prestador) ou resumo mínimo (usuário — ver
+    // comentário em admin.js sobre não guardar dado pessoal aqui)
+    if (entrada.entidadeTipo === 'usuario') {
+      return `conta criada em ${formatarDataExata(entrada.alteracoes.criadoEm)}, excluída`;
+    }
+    return `prestador "${escaparHtml(entrada.alteracoes.categoria || '—')}" excluído`;
+  }
+  return Object.entries(entrada.alteracoes)
+    .map(([campo, { de, para }]) => `${LABELS_CAMPO[campo] || campo}: "${escaparHtml(formatarValorLog(de))}" → "${escaparHtml(formatarValorLog(para))}"`)
+    .join('; ');
+}
+
+async function carregarLog() {
+  try {
+    const data = await chamarApi(`${ENDPOINT_MODERACAO_LOG}?limit=500`);
+    logListaCompleta = data.log || [];
+    aplicarFiltroLog();
+    document.getElementById('last-update').textContent = 'última atualização: ' + new Date().toLocaleTimeString('pt-BR');
+  } catch (e) {
+    mostrarErro(`Não foi possível carregar o log (${e.message}).`);
+    document.getElementById('log-tbody').innerHTML =
+      `<tr><td colspan="5" class="empty-state">${escaparHtml(e.message)}</td></tr>`;
+  }
+}
+
+function aplicarFiltroLog() {
+  const termo = document.getElementById('log-busca').value;
+  const filtrados = filtrarLinhas(logListaCompleta, termo, ['moderador', 'entidadeId']);
+  renderLog(filtrados);
+}
+
+document.getElementById('log-busca').addEventListener('input', aplicarFiltroLog);
+
+function renderLog(entradas) {
+  const tbody = document.getElementById('log-tbody');
+
+  if (!entradas || entradas.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Nenhum registro de auditoria ainda.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = entradas.map(entrada => `
+    <tr>
+      <td class="last-seen">${formatarDataExata(entrada.criadoEm)}</td>
+      <td>${escaparHtml(entrada.moderador)}</td>
+      <td>${entrada.acao === 'excluir' ? 'Excluiu' : 'Editou'}</td>
+      <td>
+        <div>${entrada.entidadeTipo === 'usuario' ? 'Usuário' : 'Prestador'}</div>
+        <div class="id-mono">${escaparHtml(entrada.entidadeId)}</div>
+      </td>
+      <td style="font-size:12px;">${formatarAlteracoesLog(entrada)}</td>
+    </tr>
+  `).join('');
+}
+
+// Histórico de UMA entidade específica (usuário ou prestador), usado
+// dentro dos modais de edição (ver abrirEdicaoUsuario/abrirEdicaoPrestador).
+// Retorna o HTML pronto pra injetar — quem chama decide onde encaixar.
+async function buscarHistoricoEntidadeHtml(entidadeTipo, entidadeId) {
+  try {
+    const data = await chamarApi(`${ENDPOINT_MODERACAO_LOG}?entidadeTipo=${entidadeTipo}&entidadeId=${encodeURIComponent(entidadeId)}&limit=50`);
+    const entradas = data.log || [];
+    if (entradas.length === 0) {
+      return '<div class="empty-state" style="padding:14px 0;">Nenhuma edição ou exclusão registrada ainda.</div>';
+    }
+    return entradas.map(entrada => `
+      <div class="modal-prestador-item" style="flex-direction:column; align-items:flex-start; gap:2px;">
+        <div style="display:flex; justify-content:space-between; width:100%; gap:8px;">
+          <span><strong>${escaparHtml(entrada.moderador)}</strong> ${entrada.acao === 'excluir' ? 'excluiu' : 'editou'}</span>
+          <span class="last-seen">${formatarDataExata(entrada.criadoEm)}</span>
+        </div>
+        <div style="font-size:11.5px; color:var(--muted);">${formatarAlteracoesLog(entrada)}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    return `<div class="empty-state" style="padding:14px 0;">Não foi possível carregar o histórico (${escaparHtml(e.message)}).</div>`;
+  }
 }
 
 // ==========================================================================
@@ -602,4 +762,5 @@ document.getElementById('theme-btn').addEventListener('click', () => {
 
 initTheme();
 initTokenField();
+initNomeField();
 carregarAbaAtiva();
