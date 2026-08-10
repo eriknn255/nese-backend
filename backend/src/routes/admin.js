@@ -1280,6 +1280,24 @@ router.get("/dashboard/mapa-prestadores", exigirAdmin, (req, res) => {
     res.json({ prestadores });
 });
 
+// GET /api/admin/dashboard/mapa-buscas-sem-resultado
+// Mesma ideia de /dashboard/mapa-prestadores, espelhada pro lado da
+// demanda: um ponto (lat/lng cru + categoria) por busca sem resultado —
+// alimenta o segundo mapa de densidade da aba "Oferta & Demanda", lado a
+// lado com o de prestadores, pra comparar visualmente "onde tem oferta"
+// com "onde a demanda esbarrou em nada". lat/lng aqui são sempre
+// preenchidos na hora da busca (ver routes/buscas.js), diferente de
+// município/estado/país que dependem do job de geocoding em background —
+// por isso não há WHERE de pendência aqui, todo registro tem ponto.
+router.get("/dashboard/mapa-buscas-sem-resultado", exigirAdmin, (req, res) => {
+    const buscas = db.prepare(`
+        SELECT lat, lng, categoria FROM buscas_sem_resultado
+        WHERE lat IS NOT NULL AND lng IS NOT NULL
+    `).all();
+
+    res.json({ buscas });
+});
+
 router.get("/dashboard/cobertura", exigirAdmin, (req, res) => {
     const usuariosPorMunicipio = db.prepare(`
         SELECT municipio, COUNT(DISTINCT usuario_id) AS totalUsuarios
@@ -1371,9 +1389,15 @@ router.get("/dashboard/buscas-sem-resultado", exigirAdmin, (req, res) => {
 //   'inferida'   — só o gap teórico, ninguém buscou isso ainda (lacuna
 //                  existe no papel, mas sem prova de demanda real).
 //
-// Ordenação: nivel (confirmada > observada > inferida) e, dentro do
-// mesmo nivel, mais buscas primeiro — a chave-mestra é PROVA de demanda,
-// não só a existência teórica do buraco.
+// A resposta é agregada por MUNICÍPIO (não mais uma linha por
+// categoria+município) — alimenta o gráfico misto da aba "Oferta &
+// Demanda": barra = totalBuscas (volume de frustração), linha =
+// categoriasConfirmadas (quantas categorias diferentes, naquele
+// município, têm os dois sinais concordando). Ordenação por
+// categoriasConfirmadas e, dentro do empate, totalBuscas — a chave-mestra
+// continua sendo PROVA de demanda, não só a existência teórica do buraco.
+// categoriasObservadas/categoriasInferidas ficam disponíveis pro tooltip
+// do gráfico dar o detalhe completo sem precisar de outra chamada.
 // ==========================================================================
 router.get("/dashboard/demanda-nao-atendida", exigirAdmin, (req, res) => {
     const buscas = db.prepare(`
@@ -1437,21 +1461,43 @@ router.get("/dashboard/demanda-nao-atendida", exigirAdmin, (req, res) => {
         }
     }
 
-    const PESO_NIVEL = { confirmada: 2, observada: 1, inferida: 0 };
+    const combos = [...combinado.values()].map(item => ({
+        ...item,
+        nivel: item.totalBuscas > 0 && item.temGapInferido
+            ? "confirmada"
+            : item.totalBuscas > 0
+                ? "observada"
+                : "inferida"
+    }));
 
-    const oportunidades = [...combinado.values()]
-        .map(item => ({
-            ...item,
-            nivel: item.totalBuscas > 0 && item.temGapInferido
-                ? "confirmada"
-                : item.totalBuscas > 0
-                    ? "observada"
-                    : "inferida"
-        }))
-        .sort((a, b) => (PESO_NIVEL[b.nivel] - PESO_NIVEL[a.nivel]) || (b.totalBuscas - a.totalBuscas))
-        .slice(0, 40);
+    // Agrega os combos categoria+município num total por município.
+    const porMunicipioMap = new Map();
+    for (const item of combos) {
+        if (!item.municipio) continue;
+        let acc = porMunicipioMap.get(item.municipio);
+        if (!acc) {
+            acc = {
+                municipio: item.municipio,
+                estado: item.estado,
+                totalBuscas: 0,
+                categoriasConfirmadas: 0,
+                categoriasObservadas: 0,
+                categoriasInferidas: 0
+            };
+            porMunicipioMap.set(item.municipio, acc);
+        }
+        acc.totalBuscas += item.totalBuscas;
+        if (!acc.estado && item.estado) acc.estado = item.estado;
+        if (item.nivel === "confirmada") acc.categoriasConfirmadas += 1;
+        else if (item.nivel === "observada") acc.categoriasObservadas += 1;
+        else acc.categoriasInferidas += 1;
+    }
 
-    res.json({ oportunidades });
+    const porMunicipio = [...porMunicipioMap.values()]
+        .sort((a, b) => (b.categoriasConfirmadas - a.categoriasConfirmadas) || (b.totalBuscas - a.totalBuscas))
+        .slice(0, 15);
+
+    res.json({ porMunicipio });
 });
 
 // ==========================================================================
@@ -1666,11 +1712,15 @@ router.get("/dashboard/status", exigirAdmin, (req, res) => {
         "SELECT COUNT(*) AS total FROM avaliacoes WHERE status = 'pendente'"
     ).get();
 
+    // LOG_RETENCAO_DIAS (não REQUEST_LOGS_RETENCAO_DIAS) e default 90 — tem
+    // que bater exatamente com RETENCAO_DIAS_PADRAO/process.env.LOG_RETENCAO_DIAS
+    // em jobs/limparRequestLogs.js, senão este número aqui só ilustra, não
+    // descreve, a retenção que de fato está em vigor.
     const jobs = {
         prestadoresPendentesGeocoding,
         buscasPendentesGeocoding,
         avaliacoesPendentes,
-        requestLogsRetencaoDias: Number(process.env.REQUEST_LOGS_RETENCAO_DIAS) || 30
+        requestLogsRetencaoDias: Number(process.env.LOG_RETENCAO_DIAS) || 90
     };
 
     // ---- saúde ----
