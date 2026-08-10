@@ -53,9 +53,6 @@
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Requests</span>
       <span class="sidebar-badge" id="sidebar-badge-seguranca" hidden>0</span>
     </button>
-    <button type="button" class="sidebar-link sidebar-link-tecnico" data-aba="seguranca" title="Segurança">
-      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Segurança</span>
-    </button>
     <button type="button" class="sidebar-link" data-aba="usuarios" title="Usuários">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Usuários</span>
     </button>
@@ -76,6 +73,9 @@
     </button>
     <button type="button" class="sidebar-link" data-aba="avaliacoes" title="Avaliações">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Avaliações</span>
+    </button>
+    <button type="button" class="sidebar-link sidebar-link-tecnico" data-aba="seguranca" title="Segurança">
+      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Segurança</span>
     </button>
     <div class="sidebar-spacer"></div>
     <button id="theme-btn" type="button" class="sidebar-theme-btn" aria-label="Alternar tema claro/escuro" title="Alternar tema">
@@ -255,15 +255,12 @@
     </section>
 
     <!-- ==================== ABA: REQUESTS ==================== -->
-    <!-- Só dois itens aqui de propósito: "Requests recentes" (todo o
-         tráfego HTTP, sem filtro) e "Requests por IP" (mesmo tráfego
-         agregado por IP, com a janela de tempo selecionável). O resto do
-         que antes vivia por aqui (Concentração por região, Acessos
-         indevidos) foi para a aba "Segurança", logo abaixo desta na
-         barra lateral — ver comentário lá. O seletor #seguranca-janela
-         continua controlando os três (ips, região, acessos indevidos),
-         só que agora mora aqui e a aba "Segurança" lê o mesmo elemento
-         (mesmo padrão de antes, só reposicionado). -->
+    <!-- "Requests recentes" continua exatamente como já estava, no topo.
+         Abaixo dela vêm os itens que antes viviam na aba "Segurança"
+         (densidade de requests por IP — ver GET /dashboard/seguranca/ips
+         em routes/admin.js), na mesma ordem de prioridade que tinham lá.
+         A aba "Segurança" continua existindo (agora ao final da barra
+         lateral), só que sem itens por enquanto — ver comentário lá. -->
     <section class="aba-conteudo" id="aba-requests" hidden>
       <div class="section-title">Requests recentes <span class="section-note">(rota, status, IP, porta — todo o tráfego HTTP)</span></div>
       <div class="table-toolbar">
@@ -293,7 +290,7 @@
         <button type="button" id="requests-carregar-mais-btn" class="toolbar-btn" hidden>Carregar mais</button>
       </div>
 
-      <div class="section-title">Requests por IP <span class="section-note">(volume e densidade de requests por IP — sinaliza padrões de DDoS/varredura, não confirma um ataque)</span></div>
+      <div class="section-title">Segurança <span class="section-note">(volume e densidade de requests por IP — sinaliza padrões de DDoS/varredura, não confirma um ataque)</span></div>
 
       <div class="table-toolbar">
         <label for="seguranca-janela" class="table-toolbar-label">Janela</label>
@@ -306,6 +303,12 @@
         <span class="search-count" id="seguranca-resumo"></span>
       </div>
 
+      <div class="section-title">Concentração por região <span class="section-note">(só entre os IPs listados abaixo, geolocalizados sob demanda)</span></div>
+      <div class="chart-card">
+        <div class="bar-chart bar-chart-horizontal" id="seguranca-por-regiao"><div class="empty-state">carregando…</div></div>
+      </div>
+
+      <div class="section-title">Requests por IP</div>
       <div class="requests-panel">
         <table>
           <thead>
@@ -321,6 +324,34 @@
           </thead>
           <tbody id="seguranca-tbody">
             <tr><td colspan="7" class="empty-state">carregando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-title">Acessos indevidos <span class="section-note">(caminhos fora do que o app expõe — arquivo interno, painel de outra stack, varredura — agrupados por rota; mesma janela selecionada acima)</span></div>
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-label">Acessos indevidos na janela</div>
+          <div class="stat-value red" id="stat-acessos-indevidos-total">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">IPs distintos</div>
+          <div class="stat-value" id="stat-acessos-indevidos-ips">—</div>
+        </div>
+      </div>
+      <div class="requests-panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Rota</th>
+              <th>Motivo</th>
+              <th>Total</th>
+              <th>IPs distintos</th>
+              <th>Última vez</th>
+            </tr>
+          </thead>
+          <tbody id="acessos-indevidos-tbody">
+            <tr><td colspan="5" class="empty-state">carregando…</td></tr>
           </tbody>
         </table>
       </div>
@@ -609,6 +640,10 @@
           <div class="stat-label">1º prestador salvo</div>
           <div class="stat-value purple" id="funil-salvo-pct">—</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-label">1º clique WhatsApp</div>
+          <div class="stat-value green" id="funil-whatsapp-pct">—</div>
+        </div>
       </div>
       <div class="refresh-note" id="funil-detalhe">carregando…</div>
 
@@ -719,44 +754,13 @@
     </section>
 
     <!-- ==================== ABA: SEGURANÇA ==================== -->
-    <!-- Logo abaixo de "Requests" na barra lateral. Recebeu "Acessos
-         indevidos" e "Concentração por região", que antes viviam na aba
-         "Requests" (ver comentário lá) — nessa ordem. Ambos ainda usam
-         a mesma janela de tempo (#seguranca-janela), que agora mora no
-         seletor da aba "Requests" (seção "Requests por IP"). -->
+    <!-- Temporariamente sem itens — o conteúdo que vivia aqui (densidade
+         de requests por IP) foi movido pra aba "Requests" (ver comentário
+         lá). Esta aba continua existindo, agora ao final da barra
+         lateral, à espera de um próximo conjunto de métricas próprias. -->
     <section class="aba-conteudo" id="aba-seguranca" hidden>
-      <div class="section-title">Acessos indevidos <span class="section-note">(caminhos fora do que o app expõe — arquivo interno, painel de outra stack, varredura — agrupados por rota; mesma janela selecionada na aba Requests)</span></div>
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-label">Acessos indevidos na janela</div>
-          <div class="stat-value red" id="stat-acessos-indevidos-total">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">IPs distintos</div>
-          <div class="stat-value" id="stat-acessos-indevidos-ips">—</div>
-        </div>
-      </div>
-      <div class="requests-panel">
-        <table>
-          <thead>
-            <tr>
-              <th>Rota</th>
-              <th>Motivo</th>
-              <th>Total</th>
-              <th>IPs distintos</th>
-              <th>Última vez</th>
-            </tr>
-          </thead>
-          <tbody id="acessos-indevidos-tbody">
-            <tr><td colspan="5" class="empty-state">carregando…</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="section-title">Concentração por região <span class="section-note">(só entre os IPs listados na aba Requests, geolocalizados sob demanda)</span></div>
-      <div class="chart-card">
-        <div class="bar-chart bar-chart-horizontal" id="seguranca-por-regiao"><div class="empty-state">carregando…</div></div>
-      </div>
+      <div class="section-title">Segurança</div>
+      <div class="empty-state">Nenhum item nesta aba por enquanto.</div>
     </section>
 
   </div>
