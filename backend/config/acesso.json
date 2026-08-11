@@ -1,0 +1,21 @@
+{
+  "_comentario": [
+    "Configuração de acesso à página criar-acesso/ (POST /api/admin/contas).",
+    "Versionado no Git DE PROPÓSITO: nada aqui é segredo. Saber qual IP está",
+    "liberado não ajuda ninguém a entrar — não dá pra forjar IP de origem numa",
+    "conexão TCP, e o ADMIN_TOKEN continua exigido por cima disso.",
+    "",
+    "Mudou o IP? Edite este arquivo, commit, git pull no servidor, pm2 restart.",
+    "Nunca editando arquivo à mão na EC2 — o estado do servidor tem que ser",
+    "reproduzível a partir do repositório.",
+    "",
+    "Segredos (ADMIN_TOKEN, JWT_SECRET, ADMIN_SESSION_SECRET) continuam no .env,",
+    "fora do Git. São definidos uma vez e quase nunca mudam.",
+    "",
+    "Ver backend/src/middleware/redeAutorizada.js."
+  ],
+  "ips": [168.90.91.170/32],
+  "horario": "07:00-21:00",
+  "fusoHorario": "America/Fortaleza",
+  "paises": [Brazil]
+}
