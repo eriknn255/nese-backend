@@ -638,3 +638,74 @@ a.sidebar-theme-btn { text-decoration: none; }
     margin-bottom: 20px;
     display: none;
   }
+
+/* ==========================================================================
+   LOG DE AUDITORIA — cada campo alterado numa linha própria (nome do
+   campo | valor antigo | seta | valor novo) em vez de uma frase corrida,
+   porque um único PATCH pode mudar vários campos de uma vez (ver
+   listaCamposAlterados/formatarAlteracoesLog em script.js). Usado tanto
+   na aba geral (dentro de <details> quando são 2+ campos) quanto no
+   histórico por entidade dentro dos modais (sempre expandido).
+   ========================================================================== */
+
+.log-celula-alteracoes {
+    font-size: 12px;
+    max-width: 420px;
+  }
+
+.log-campo-linha {
+    display: grid;
+    grid-template-columns: minmax(90px, auto) 1fr auto 1fr;
+    align-items: baseline;
+    gap: 6px;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+.log-campo-linha:last-child { border-bottom: none; }
+
+.log-campo-nome {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+.log-campo-de {
+    color: var(--muted);
+    text-decoration: line-through;
+    word-break: break-word;
+  }
+
+.log-campo-seta {
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+.log-campo-para {
+    color: var(--ink);
+    font-weight: 500;
+    word-break: break-word;
+  }
+
+.log-celula-alteracoes details summary {
+    cursor: pointer;
+    color: var(--gold);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    list-style: none;
+  }
+
+.log-celula-alteracoes details summary::-webkit-details-marker { display: none; }
+
+.log-celula-alteracoes details summary::before {
+    content: '▸ ';
+  }
+
+.log-celula-alteracoes details[open] summary::before {
+    content: '▾ ';
+  }
+
+.log-celula-alteracoes details[open] summary {
+    margin-bottom: 6px;
+  }
