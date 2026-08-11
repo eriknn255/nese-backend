@@ -324,16 +324,24 @@
          tudo num lugar só, do mais específico (linha por IP) ao mais
          panorâmico (região). -->
     <section class="aba-conteudo" id="aba-seguranca" hidden>
-      <div class="section-title">Segurança </div>
-      <div class="table-toolbar table-toolbar-direita">
-        <label for="seguranca-janela" class="table-toolbar-label">Janela</label>
-        <select id="seguranca-janela">
-          <option value="15">Últimos 15 min</option>
-          <option value="60">Última 1h</option>
-          <option value="360">Últimas 6h</option>
-          <option value="1440">Últimas 24h</option>
-        </select>
-        <span class="search-count" id="seguranca-resumo"></span>
+      <!-- Seletor de janela no cabeçalho da SEÇÃO, não numa linha só dele:
+           ele governa a aba inteira ("Requests por IP" E "Requests
+           suspeitos" leem a mesma janela — ver obterJanelaSeguranca em
+           script.js), então mora no título que nomeia esse conjunto. Se
+           descesse pro cabeçalho de "Requests por IP", passaria a
+           parecer que só filtra aquela tabela. -->
+      <div class="section-header">
+        <div class="section-title">Segurança <span class="section-note">(janela vale para todas as tabelas desta aba)</span></div>
+        <div class="section-header-controles">
+          <label for="seguranca-janela" class="table-toolbar-label">Janela</label>
+          <select id="seguranca-janela">
+            <option value="15">Últimos 15 min</option>
+            <option value="60">Última 1h</option>
+            <option value="360">Últimas 6h</option>
+            <option value="1440">Últimas 24h</option>
+          </select>
+          <span class="search-count" id="seguranca-resumo"></span>
+        </div>
       </div>
 
       <div class="section-title">Requests por IP <span class="section-note">(volume e densidade de requests por IP)</span></div>
