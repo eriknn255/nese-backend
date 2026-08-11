@@ -246,4 +246,15 @@ db.exec(`
 db.exec("CREATE INDEX IF NOT EXISTS idx_log_auditoria_criado ON log_auditoria_moderacao(criado_em DESC)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_log_auditoria_entidade ON log_auditoria_moderacao(entidade_tipo, entidade_id, criado_em DESC)");
 
+// origem: 'moderacao' (painel de moderação, ADMIN_TOKEN) ou 'usuario' (a
+// própria conta editando/excluindo pelo app normal — ver
+// utils/auditoria.js). Migração porque a tabela já existia só com o lado
+// da moderação; DEFAULT 'moderacao' preserva o significado das linhas
+// antigas, todas gravadas antes de origem existir.
+const colunasLogAuditoria = db.prepare("PRAGMA table_info(log_auditoria_moderacao)").all();
+if (!colunasLogAuditoria.some(c => c.name === "origem")) {
+    db.exec("ALTER TABLE log_auditoria_moderacao ADD COLUMN origem TEXT NOT NULL DEFAULT 'moderacao'");
+    console.log("[db] migração aplicada: log_auditoria_moderacao.origem");
+}
+
 module.exports = db;
