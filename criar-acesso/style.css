@@ -33,6 +33,10 @@ body {
   padding: 24px;
 }
 
+.logo-img{
+   border-radius: 10px;
+}
+
 .caixa {
   width: 100%;
   max-width: 400px;
