@@ -819,7 +819,14 @@ function preencherHoras(linhas, horas) {
 }
 
 const HORAS_PADRAO = 24;
-const HORAS_MAXIMO = 168; // 7 dias — teto pra ninguém pedir uma grade absurda
+// 168 = 7 dias. Continua sendo o teto de quem pede a janela em HORAS e
+// espera resolução horária.
+const HORAS_MAXIMO = 168;
+// Teto das janelas longas dos gráficos (1 ano). Pode ser bem mais alto
+// que HORAS_MAXIMO porque a granularidade adapta sozinha (hora -> dia ->
+// mês, ver escolherGranularidade): o que precisava ser contido era o
+// número de PONTOS no eixo, não o tamanho da janela em si.
+const HORAS_MAXIMO_GRAFICOS = 24 * 365;
 
 const DIAS_CADASTROS_PADRAO = 14;
 const DIAS_CADASTROS_MAXIMO = 90;
@@ -828,6 +835,104 @@ function lerHoras(req) {
     const bruto = Number.parseInt(req.query.horas, 10);
     if (!Number.isFinite(bruto) || bruto <= 0) return HORAS_PADRAO;
     return Math.min(bruto, HORAS_MAXIMO);
+}
+
+// ==========================================================================
+// JANELA DOS GRÁFICOS — resolve `?horas=N` ou `?horas=tudo` num intervalo
+// concreto + a GRANULARIDADE do eixo X.
+//
+// Granularidade é automática, não escolhida por quem chama: uma janela
+// longa em resolução de hora vira uma grade impossível de ler e de
+// desenhar (90 dias = 2.160 pontos num gráfico de ~700px — menos de um
+// pixel por ponto). A régua:
+//   até  3 dias  -> hora   (até 72 colunas)
+//   até 90 dias  -> dia    (até 90 colunas)
+//   acima disso  -> mês    (o app envelhece sem estourar o eixo)
+//
+// "tudo" = desde o registro mais antigo que EXISTE na tabela consultada,
+// e é aqui que mora uma ressalva importante: pra request_logs isso NÃO é
+// "desde a criação do app". Aquela tabela tem TTL (ver
+// jobs/limparRequestLogs.js + LOG_RETENCAO_DIAS, default 90 dias), então
+// o dado mais antigo some sozinho. Já pra `usuarios` (gráficos
+// comerciais) "tudo" é literal: nada é apagado por TTL lá, então a série
+// vai mesmo até o primeiro cadastro. Cada endpoint informa o `desde` que
+// usou pro front poder rotular isso com honestidade.
+// ==========================================================================
+const GRANULARIDADES = {
+    hora: { chaveSql: "%Y-%m-%d %H:00", ms: MS_HORA },
+    dia: { chaveSql: "%Y-%m-%d", ms: MS_DIA },
+    mes: { chaveSql: "%Y-%m", ms: null } // mês não tem duração fixa — grade gerada por calendário
+};
+
+function escolherGranularidade(spanMs) {
+    if (spanMs <= 3 * MS_DIA) return "hora";
+    if (spanMs <= 90 * MS_DIA) return "dia";
+    return "mes";
+}
+
+// tabela/coluna entram por parâmetro (não vêm da query string) porque
+// isto é interpolado direto no SQL — nunca exponha isso a input do
+// usuário.
+function resolverJanelaGraficos(req, { tabela, coluna = "criado_em" }) {
+    const bruto = String(req.query.horas || "").trim();
+    const agora = Date.now();
+
+    if (bruto === "tudo") {
+        const linha = db.prepare(`SELECT MIN(${coluna}) AS inicio FROM ${tabela}`).get();
+        // Tabela vazia: cai pro padrão em vez de devolver uma janela
+        // infinita (ou NaN) — sem dado nenhum, qualquer janela dá o mesmo
+        // gráfico vazio, então o padrão é a resposta menos surpreendente.
+        const desde = linha && linha.inicio ? linha.inicio : agora - HORAS_PADRAO * MS_HORA;
+        return { desde, ate: agora, granularidade: escolherGranularidade(agora - desde), tudo: true };
+    }
+
+    const bruteHoras = Number.parseInt(bruto, 10);
+    const horas = (Number.isFinite(bruteHoras) && bruteHoras > 0)
+        ? Math.min(bruteHoras, HORAS_MAXIMO_GRAFICOS)
+        : HORAS_PADRAO;
+    const desde = agora - horas * MS_HORA;
+    return { desde, ate: agora, granularidade: escolherGranularidade(horas * MS_HORA), tudo: false, horas };
+}
+
+// Grade completa do eixo X (mais antigo primeiro), pra que buraco sem
+// dado vire zero em vez de sumir e distorcer a leitura do gráfico.
+function gerarGrade(desde, ate, granularidade) {
+    const chaves = [];
+    const d = new Date(desde);
+
+    if (granularidade === "mes") {
+        d.setUTCDate(1);
+        d.setUTCHours(0, 0, 0, 0);
+        while (d.getTime() <= ate) {
+            chaves.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+            d.setUTCMonth(d.getUTCMonth() + 1);
+        }
+        return chaves;
+    }
+
+    const pad = n => String(n).padStart(2, "0");
+    if (granularidade === "dia") {
+        d.setUTCHours(0, 0, 0, 0);
+        for (let t = d.getTime(); t <= ate; t += MS_DIA) {
+            const x = new Date(t);
+            chaves.push(`${x.getUTCFullYear()}-${pad(x.getUTCMonth() + 1)}-${pad(x.getUTCDate())}`);
+        }
+        return chaves;
+    }
+
+    d.setUTCMinutes(0, 0, 0);
+    for (let t = d.getTime(); t <= ate; t += MS_HORA) {
+        chaves.push(gerarChaveHoraUTC(t));
+    }
+    return chaves;
+}
+
+function preencherGrade(linhas, desde, ate, granularidade) {
+    const mapa = new Map(linhas.map(l => [l.bucket, l.total]));
+    return gerarGrade(desde, ate, granularidade).map(bucket => ({
+        bucket,
+        total: mapa.get(bucket) || 0
+    }));
 }
 
 // ==========================================================================
@@ -853,53 +958,69 @@ function lerHoras(req) {
 //   tráfego recente, não sobre a janela ajustável de `horas`.
 // ==========================================================================
 router.get("/dashboard/graficos/tecnicos", exigirNivel('ver'), (req, res) => {
-    const horas = lerHoras(req);
-    const desde = Date.now() - horas * MS_HORA;
+    const { desde, ate, granularidade, tudo } = resolverJanelaGraficos(req, { tabela: "request_logs" });
+    const fmt = GRANULARIDADES[granularidade].chaveSql;
 
-    const requestsPorHoraBrutos = db.prepare(`
-        SELECT strftime('%Y-%m-%d %H:00', criado_em / 1000, 'unixepoch') AS hora,
+    const requestsBrutos = db.prepare(`
+        SELECT strftime('${fmt}', criado_em / 1000, 'unixepoch') AS bucket,
                COUNT(*) AS total
         FROM request_logs
         WHERE criado_em >= ?
-        GROUP BY hora
+        GROUP BY bucket
     `).all(desde);
 
-    const errosPorHoraBrutos = db.prepare(`
-        SELECT strftime('%Y-%m-%d %H:00', criado_em / 1000, 'unixepoch') AS hora,
+    const errosBrutos = db.prepare(`
+        SELECT strftime('${fmt}', criado_em / 1000, 'unixepoch') AS bucket,
                COUNT(*) AS total
         FROM request_logs
         WHERE criado_em >= ? AND ${CONDICAO_SQL_ERRO}
-        GROUP BY hora
+        GROUP BY bucket
     `).all(desde);
 
-    const usuariosAtivosPorHoraBrutos = db.prepare(`
-        SELECT strftime('%Y-%m-%d %H:00', criado_em / 1000, 'unixepoch') AS hora,
+    const usuariosAtivosBrutos = db.prepare(`
+        SELECT strftime('${fmt}', criado_em / 1000, 'unixepoch') AS bucket,
                COUNT(DISTINCT usuario_id) AS total
         FROM request_logs
         WHERE criado_em >= ? AND usuario_id IS NOT NULL
-        GROUP BY hora
+        GROUP BY bucket
     `).all(desde);
 
+    // Distribuição por classe de status acompanha a janela escolhida (era
+    // fixa em 24h): olhar 30 dias de tráfego e ver a barra de status ainda
+    // presa em "ontem" faria os dois blocos discordarem na mesma tela.
     const requestsPorStatusBrutos = db.prepare(`
         SELECT CAST(status_code / 100 AS INTEGER) AS centena, COUNT(*) AS total
         FROM request_logs
         WHERE criado_em >= ?
         GROUP BY centena
         ORDER BY centena ASC
-    `).all(Date.now() - MS_DIA);
+    `).all(desde);
 
-    const requestsPorStatusUltimas24h = requestsPorStatusBrutos.map(r => ({
+    const requestsPorStatus = requestsPorStatusBrutos.map(r => ({
         classe: `${r.centena}xx`,
         total: r.total
     }));
 
-    res.json({
-        requestsPorHora: preencherHoras(requestsPorHoraBrutos, horas),
-        errosPorHora: preencherHoras(errosPorHoraBrutos, horas),
-        usuariosAtivosPorHora: preencherHoras(usuariosAtivosPorHoraBrutos, horas),
-        requestsPorStatusUltimas24h,
-        horas
-    });
+    // Nomes antigos (requestsPorHora etc.) mantidos como ALIAS pra não
+    // quebrar nada que ainda leia a resposta pela chave velha; as chaves
+    // novas são as que o front usa. O item agora é { bucket, total } —
+    // "bucket" e não "hora" porque a granularidade varia com a janela.
+    const payload = {
+        requests: preencherGrade(requestsBrutos, desde, ate, granularidade),
+        erros: preencherGrade(errosBrutos, desde, ate, granularidade),
+        usuariosAtivos: preencherGrade(usuariosAtivosBrutos, desde, ate, granularidade),
+        requestsPorStatus,
+        granularidade,
+        desde,
+        ate,
+        tudo
+    };
+    payload.requestsPorHora = payload.requests;
+    payload.errosPorHora = payload.erros;
+    payload.usuariosAtivosPorHora = payload.usuariosAtivos;
+    payload.requestsPorStatusUltimas24h = requestsPorStatus;
+
+    res.json(payload);
 });
 
 // ==========================================================================
@@ -936,8 +1057,10 @@ router.get("/dashboard/graficos/tecnicos", exigirNivel('ver'), (req, res) => {
 // janela de algumas horas, sem precisar de infra de métricas dedicada.
 // ==========================================================================
 router.get("/dashboard/rotas-populares", exigirNivel('ver'), (req, res) => {
-    const horas = lerHoras(req);
-    const desde = Date.now() - horas * MS_HORA;
+    // Mesma janela dos gráficos da aba (aceita ?horas=N e ?horas=tudo) —
+    // as duas tabelas ficam logo abaixo dos gráficos, discordar de janela
+    // na mesma tela seria armadilha de leitura.
+    const { desde } = resolverJanelaGraficos(req, { tabela: "request_logs" });
 
     const brutos = db.prepare(`
         SELECT
@@ -961,12 +1084,11 @@ router.get("/dashboard/rotas-populares", exigirNivel('ver'), (req, res) => {
         totalErros: r.totalErros
     }));
 
-    res.json({ porRota, horas });
+    res.json({ porRota });
 });
 
 router.get("/dashboard/erros-por-rota", exigirNivel('ver'), (req, res) => {
-    const horas = lerHoras(req);
-    const desde = Date.now() - horas * MS_HORA;
+    const { desde } = resolverJanelaGraficos(req, { tabela: "request_logs" });
 
     const brutos = db.prepare(`
         SELECT
@@ -997,7 +1119,7 @@ router.get("/dashboard/erros-por-rota", exigirNivel('ver'), (req, res) => {
         ultimoErroEm: r.ultimoErroEm
     }));
 
-    res.json({ porRota, horas });
+    res.json({ porRota });
 });
 
 // ==========================================================================
@@ -1075,19 +1197,45 @@ router.get("/dashboard/erros-hoje", exigirNivel('ver'), (req, res) => {
 //   qual mostrar.
 // ==========================================================================
 router.get("/dashboard/graficos/comercial", exigirNivel('ver'), (req, res) => {
-    const diasBruto = Number.parseInt(req.query.dias, 10);
-    const dias = (Number.isFinite(diasBruto) && diasBruto > 0)
-        ? Math.min(diasBruto, DIAS_CADASTROS_MAXIMO)
-        : DIAS_CADASTROS_PADRAO;
+    // ?dias=tudo -> desde o PRIMEIRO cadastro. Aqui "tudo" é literal, ao
+    // contrário dos gráficos técnicos: `usuarios` não tem TTL, nada é
+    // apagado, então a série cobre mesmo toda a vida do app. A
+    // granularidade acompanha o tamanho da janela (dia -> mês) pra não
+    // virar uma grade ilegível quando o app tiver anos de idade.
+    const pediuTudo = String(req.query.dias || "").trim() === "tudo";
+    const agora = Date.now();
 
-    const cadastrosPorDia = db.prepare(`
-        SELECT strftime('%Y-%m-%d', criado_em / 1000, 'unixepoch') AS dia,
+    let desde;
+    let dias;
+    if (pediuTudo) {
+        const linha = db.prepare("SELECT MIN(criado_em) AS inicio FROM usuarios").get();
+        desde = linha && linha.inicio ? linha.inicio : agora - DIAS_CADASTROS_PADRAO * MS_DIA;
+        dias = Math.max(1, Math.ceil((agora - desde) / MS_DIA));
+    } else {
+        const diasBruto = Number.parseInt(req.query.dias, 10);
+        dias = (Number.isFinite(diasBruto) && diasBruto > 0)
+            ? Math.min(diasBruto, DIAS_CADASTROS_MAXIMO)
+            : DIAS_CADASTROS_PADRAO;
+        desde = agora - dias * MS_DIA;
+    }
+
+    const granularidadeCadastros = escolherGranularidade(agora - desde) === "mes" ? "mes" : "dia";
+    const fmtCadastros = GRANULARIDADES[granularidadeCadastros].chaveSql;
+
+    const cadastrosBrutos = db.prepare(`
+        SELECT strftime('${fmtCadastros}', criado_em / 1000, 'unixepoch') AS bucket,
                COUNT(*) AS total
         FROM usuarios
         WHERE criado_em >= ?
-        GROUP BY dia
-        ORDER BY dia ASC
-    `).all(Date.now() - dias * MS_DIA);
+        GROUP BY bucket
+        ORDER BY bucket ASC
+    `).all(desde);
+
+    // Grade preenchida (dia/mês sem cadastro vira 0) — antes a série vinha
+    // crua do SQL, então um dia sem ninguém se cadastrando simplesmente
+    // não existia no eixo e a linha "pulava" o vazio, achatando a leitura.
+    const cadastrosPorDia = preencherGrade(cadastrosBrutos, desde, agora, granularidadeCadastros)
+        .map(({ bucket, total }) => ({ dia: bucket, bucket, total }));
 
     const cadastrosPorHoraBrutos = db.prepare(`
         SELECT strftime('%Y-%m-%d %H:00', criado_em / 1000, 'unixepoch') AS hora,
@@ -1125,6 +1273,9 @@ router.get("/dashboard/graficos/comercial", exigirNivel('ver'), (req, res) => {
 
     res.json({
         cadastrosPorDia,
+        granularidadeCadastros,
+        desde,
+        tudo: pediuTudo,
         cadastrosPorHora: preencherHoras(cadastrosPorHoraBrutos, HORAS_PADRAO),
         prestadoresPorCategoria,
         clientesVsPrestadores: {
