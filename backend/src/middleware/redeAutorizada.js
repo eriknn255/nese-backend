@@ -34,20 +34,54 @@ const { obterLocalizacoesEmLote } = require("../utils/ipLocalizacao");
 // por causa de uma API de terceiro.
 // ==========================================================================
 
-// Sem BOOTSTRAP_IPS configurado, a rota fica FECHADA (nega tudo), não
-// aberta. Esquecer de configurar tem que falhar pro lado seguro — o
-// contrário deixaria a criação de login exposta pra internet inteira
-// sem ninguém perceber.
-const IPS_BRUTO = (process.env.BOOTSTRAP_IPS || "").trim();
-const HORARIO_BRUTO = (process.env.BOOTSTRAP_HORARIO || "").trim();
-const PAISES_BRUTO = (process.env.BOOTSTRAP_PAISES || "").trim();
-const FUSO = process.env.BOOTSTRAP_TZ || "America/Fortaleza";
+// ==========================================================================
+// De onde vem a configuração: backend/config/acesso.json, VERSIONADO no
+// Git. Nada aqui é segredo (ver comentário no próprio JSON), então o
+// lugar certo é o repositório — assim mudar o IP liberado é um commit,
+// e o servidor se reproduz com `git pull && pm2 restart`, sem ninguém
+// editando arquivo à mão na EC2.
+//
+// As variáveis de ambiente equivalentes (BOOTSTRAP_IPS etc.) continuam
+// funcionando e têm PRECEDÊNCIA sobre o JSON — mas só como escotilha de
+// emergência: liberar um IP novo às pressas sem esperar deploy. O estado
+// normal e esperado é o arquivo versionado.
+// ==========================================================================
+const path = require("path");
 
-// Aceita IP exato ("189.40.1.7") ou faixa CIDR ("189.40.1.0/24"), IPv4.
-// CIDR importa porque IP residencial/link dedicado costuma variar dentro
-// de uma faixa — travar num IP exato daria bloqueio toda vez que o
-// roteador renegociasse endereço.
-const REGRAS_IP = IPS_BRUTO ? IPS_BRUTO.split(",").map(s => s.trim()).filter(Boolean) : [];
+function carregarConfig() {
+    try {
+        // require em vez de fs.readFileSync: o cache do Node garante que
+        // o arquivo é lido uma vez só por boot, que é exatamente a
+        // semântica que a config precisa (mudou o JSON? precisa de
+        // restart, igual .env — nada de reler a cada request).
+        return require(path.join(__dirname, "../../config/acesso.json"));
+    } catch (erro) {
+        // Arquivo ausente ou JSON inválido não pode derrubar o servidor
+        // inteiro — degrada pra "criação de login fechada", que é o
+        // mesmo lado seguro de não ter IP configurado.
+        console.error("[bootstrap] falha ao ler config/acesso.json:", erro.message);
+        return {};
+    }
+}
+
+const CONFIG = carregarConfig();
+
+// Env vence o JSON quando presente (escotilha de emergência).
+const IPS_BRUTO = (process.env.BOOTSTRAP_IPS || "").trim();
+const HORARIO_BRUTO = (process.env.BOOTSTRAP_HORARIO || CONFIG.horario || "").trim();
+const PAISES_BRUTO = (process.env.BOOTSTRAP_PAISES || "").trim();
+const FUSO = process.env.BOOTSTRAP_TZ || CONFIG.fusoHorario || "America/Fortaleza";
+
+// Lista vazia = rota FECHADA (nega tudo), nunca aberta. Esquecer de
+// configurar tem que falhar pro lado seguro — o contrário deixaria a
+// criação de login exposta pra internet inteira sem ninguém perceber.
+const REGRAS_IP = IPS_BRUTO
+    ? IPS_BRUTO.split(",").map(s => s.trim()).filter(Boolean)
+    : (Array.isArray(CONFIG.ips) ? CONFIG.ips.map(s => String(s).trim()).filter(Boolean) : []);
+
+const PAISES_PERMITIDOS = PAISES_BRUTO
+    ? PAISES_BRUTO.split(",").map(s => s.trim()).filter(Boolean)
+    : (Array.isArray(CONFIG.paises) ? CONFIG.paises.map(s => String(s).trim()).filter(Boolean) : []);
 
 function ipParaNumero(ip) {
     const partes = ip.split(".");
@@ -124,9 +158,9 @@ function horarioAutorizado(agora = new Date()) {
 }
 
 async function paisAutorizado(ip) {
-    if (!PAISES_BRUTO) return { ok: true }; // desligado por padrão
+    if (PAISES_PERMITIDOS.length === 0) return { ok: true }; // desligado por padrão
 
-    const permitidos = PAISES_BRUTO.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+    const permitidos = PAISES_PERMITIDOS.map(s => s.toLowerCase());
     try {
         const mapa = await obterLocalizacoesEmLote([normalizarIp(ip)]);
         const info = mapa.get(normalizarIp(ip));
@@ -147,7 +181,7 @@ async function avaliarAcesso(req) {
     const ip = normalizarIp(req.ip);
 
     if (REGRAS_IP.length === 0) {
-        return { permitido: false, motivo: "Servidor sem BOOTSTRAP_IPS configurado — criação de login está fechada.", ip };
+        return { permitido: false, motivo: "Nenhum IP autorizado em config/acesso.json — criação de login está fechada.", ip };
     }
     if (!ipAutorizado(ip)) {
         return { permitido: false, motivo: "Este IP não está autorizado a criar logins.", ip };
