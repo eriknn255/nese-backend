@@ -178,27 +178,31 @@ async function paisAutorizado(ip) {
     }
 }
 
-// Resultado detalhado, sem efeito colateral — serve tanto pro middleware
-// quanto pro endpoint de status que a página consulta antes de mostrar o
-// formulário.
+// Resultado detalhado, sem efeito colateral. O campo `motivoInterno`
+// NUNCA vai pra resposta HTTP: é só pro log do servidor. Quem está do
+// outro lado recebe sempre a mesma negativa genérica, independente de
+// ter sido IP, horário, país ou config quebrada — dizer QUAL regra
+// barrou entrega o desenho do controle de graça (ex: "é horário" revela
+// que existe janela e convida a voltar mais tarde; "é IP" confirma que
+// existe allowlist). Ver MENSAGEM_GENERICA abaixo.
 async function avaliarAcesso(req) {
     const ip = normalizarIp(req.ip);
 
     if (CONFIG._erroLeitura) {
-        return { permitido: false, motivo: `config/acesso.json inválido (${CONFIG._erroLeitura}) — corrija o arquivo e reinicie.`, ip };
+        return { permitido: false, motivoInterno: `config/acesso.json inválido (${CONFIG._erroLeitura})`, ip };
     }
     if (REGRAS_IP.length === 0) {
-        return { permitido: false, motivo: "Nenhum IP autorizado em config/acesso.json — criação de login está fechada.", ip };
+        return { permitido: false, motivoInterno: "nenhum IP autorizado em config/acesso.json", ip };
     }
     if (!ipAutorizado(ip)) {
-        return { permitido: false, motivo: "Este IP não está autorizado a criar logins.", ip };
+        return { permitido: false, motivoInterno: "IP fora da allowlist", ip };
     }
     if (!horarioAutorizado()) {
-        return { permitido: false, motivo: `Fora da janela de horário permitida (${HORARIO_BRUTO}, ${FUSO}).`, ip };
+        return { permitido: false, motivoInterno: `fora da janela ${HORARIO_BRUTO} (${FUSO})`, ip };
     }
     const pais = await paisAutorizado(ip);
     if (!pais.ok) {
-        return { permitido: false, motivo: `Localização não autorizada (${pais.pais}).`, ip };
+        return { permitido: false, motivoInterno: `país não autorizado (${pais.pais})`, ip };
     }
     return { permitido: true, ip };
 }
@@ -207,17 +211,29 @@ async function avaliarAcesso(req) {
 // deliberado: quem legitimamente precisa liberar o próprio acesso tem
 // que saber qual endereço colocar no .env, e o IP de origem não é
 // segredo pra quem está fazendo a request (ele já é o dono dele).
+// Resposta única pra qualquer negativa. Também NÃO devolve o IP de
+// volta: mesmo sendo um dado que o visitante já possui, ecoá-lo confirma
+// que o servidor o está inspecionando — e, pra quem tenta atrás de proxy
+// ou VPN, entrega qual endereço chegou de verdade, o que ajuda a calibrar
+// tentativas. Descobrir o próprio IP pra liberar acesso legítimo se faz
+// pelo log do servidor, que só o administrador lê.
+const MENSAGEM_GENERICA = "Não foi possível concluir a operação.";
+
 function exigirRedeAutorizada(req, res, next) {
     avaliarAcesso(req).then(resultado => {
         if (!resultado.permitido) {
-            console.warn(`[bootstrap] tentativa bloqueada de ${resultado.ip}: ${resultado.motivo}`);
-            return res.status(403).json({ erro: resultado.motivo, ip: resultado.ip });
+            console.warn(`[bootstrap] BLOQUEADO ip=${resultado.ip} motivo=${resultado.motivoInterno}`);
+            // 404, não 403: 403 significa "existe e você não pode", o que
+            // confirma que a rota existe e é protegida. 404 é indistinto
+            // de uma URL que nunca existiu — quem varre a API não aprende
+            // que aqui mora a criação de login.
+            return res.status(404).json({ erro: MENSAGEM_GENERICA });
         }
         next();
     }).catch(erro => {
         console.error("[bootstrap] falha ao avaliar acesso:", erro);
-        res.status(500).json({ erro: "Não foi possível validar o acesso agora." });
+        res.status(500).json({ erro: MENSAGEM_GENERICA });
     });
 }
 
-module.exports = { exigirRedeAutorizada, avaliarAcesso };
+module.exports = { exigirRedeAutorizada, avaliarAcesso, MENSAGEM_GENERICA };
