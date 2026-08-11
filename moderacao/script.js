@@ -592,7 +592,8 @@ function normalizarTagLocal(texto) {
 
 // ==========================================================================
 // LOG DE AUDITORIA — lista geral (ver GET /moderacao/log em admin.js).
-// Cada linha resume um PATCH ou DELETE feito nesta tela: quem, quando,
+// Cada linha resume um PATCH ou DELETE (feito na moderação OU pelo próprio
+// usuário no app normal — ver origem/ator) numa entidade: quem, quando,
 // em qual entidade, e o diff (ou snapshot, no caso de exclusão).
 // ==========================================================================
 
@@ -611,19 +612,56 @@ function formatarValorLog(valor) {
   return String(valor);
 }
 
-function formatarAlteracoesLog(entrada) {
-  if (!entrada.alteracoes) return '—';
+// 'usuario' = a própria conta, editando/excluindo pelo app normal;
+// 'moderacao' = painel de moderação com ADMIN_TOKEN (ver origem em
+// utils/auditoria.js).
+function labelOrigem(origem) {
+  return origem === 'usuario' ? 'Usuário' : 'Moderação';
+}
+
+// Lista de campos alterados em HTML — um por linha, em vez de uma string
+// única concatenada. Um PATCH só pode mexer em vários campos de uma vez
+// (ex: categoria + telefone + horário juntos), então isso não pode virar
+// uma frase corrida: quebra o layout da tabela e fica ilegível.
+function listaCamposAlterados(alteracoes) {
+  return Object.entries(alteracoes).map(([campo, { de, para }]) => `
+    <div class="log-campo-linha">
+      <span class="log-campo-nome">${escaparHtml(LABELS_CAMPO[campo] || campo)}</span>
+      <span class="log-campo-de">${escaparHtml(formatarValorLog(de))}</span>
+      <span class="log-campo-seta">→</span>
+      <span class="log-campo-para">${escaparHtml(formatarValorLog(para))}</span>
+    </div>
+  `).join('');
+}
+
+// compacto=true (histórico dentro do modal, já tem espaço vertical de
+// sobra): mostra a lista inteira direto. compacto=false (tabela geral,
+// uma linha por registro): esconde atrás de um <details> nativo quando
+// tem mais de 1 campo, pra não estourar a altura da linha.
+function formatarAlteracoesLog(entrada, { compacto = false } = {}) {
   if (entrada.acao === 'excluir') {
+    if (!entrada.alteracoes) return '—';
     // snapshot completo (prestador) ou resumo mínimo (usuário — ver
-    // comentário em admin.js sobre não guardar dado pessoal aqui)
+    // comentário em admin.js/usuarios.js sobre não guardar dado pessoal
+    // de conta apagada aqui) — sempre cabe numa linha só.
     if (entrada.entidadeTipo === 'usuario') {
       return `conta criada em ${formatarDataExata(entrada.alteracoes.criadoEm)}, excluída`;
     }
     return `prestador "${escaparHtml(entrada.alteracoes.categoria || '—')}" excluído`;
   }
-  return Object.entries(entrada.alteracoes)
-    .map(([campo, { de, para }]) => `${LABELS_CAMPO[campo] || campo}: "${escaparHtml(formatarValorLog(de))}" → "${escaparHtml(formatarValorLog(para))}"`)
-    .join('; ');
+
+  if (!entrada.alteracoes) return '—';
+  const campos = Object.keys(entrada.alteracoes);
+  const listaHtml = listaCamposAlterados(entrada.alteracoes);
+
+  if (compacto || campos.length === 1) return listaHtml;
+
+  return `
+    <details>
+      <summary>${campos.length} campos alterados</summary>
+      ${listaHtml}
+    </details>
+  `;
 }
 
 async function carregarLog() {
@@ -641,7 +679,7 @@ async function carregarLog() {
 
 function aplicarFiltroLog() {
   const termo = document.getElementById('log-busca').value;
-  const filtrados = filtrarLinhas(logListaCompleta, termo, ['moderador', 'entidadeId']);
+  const filtrados = filtrarLinhas(logListaCompleta, termo, ['ator', 'entidadeId']);
   renderLog(filtrados);
 }
 
@@ -658,13 +696,16 @@ function renderLog(entradas) {
   tbody.innerHTML = entradas.map(entrada => `
     <tr>
       <td class="last-seen">${formatarDataExata(entrada.criadoEm)}</td>
-      <td>${escaparHtml(entrada.moderador)}</td>
+      <td>
+        <div>${escaparHtml(entrada.ator)}</div>
+        <div class="last-seen" style="opacity:0.7;">${labelOrigem(entrada.origem)}</div>
+      </td>
       <td>${entrada.acao === 'excluir' ? 'Excluiu' : 'Editou'}</td>
       <td>
         <div>${entrada.entidadeTipo === 'usuario' ? 'Usuário' : 'Prestador'}</div>
         <div class="id-mono">${escaparHtml(entrada.entidadeId)}</div>
       </td>
-      <td style="font-size:12px;">${formatarAlteracoesLog(entrada)}</td>
+      <td class="log-celula-alteracoes">${formatarAlteracoesLog(entrada)}</td>
     </tr>
   `).join('');
 }
@@ -680,12 +721,12 @@ async function buscarHistoricoEntidadeHtml(entidadeTipo, entidadeId) {
       return '<div class="empty-state" style="padding:14px 0;">Nenhuma edição ou exclusão registrada ainda.</div>';
     }
     return entradas.map(entrada => `
-      <div class="modal-prestador-item" style="flex-direction:column; align-items:flex-start; gap:2px;">
+      <div class="modal-prestador-item" style="flex-direction:column; align-items:flex-start; gap:4px;">
         <div style="display:flex; justify-content:space-between; width:100%; gap:8px;">
-          <span><strong>${escaparHtml(entrada.moderador)}</strong> ${entrada.acao === 'excluir' ? 'excluiu' : 'editou'}</span>
+          <span><strong>${escaparHtml(entrada.ator)}</strong> (${labelOrigem(entrada.origem)}) ${entrada.acao === 'excluir' ? 'excluiu' : 'editou'}</span>
           <span class="last-seen">${formatarDataExata(entrada.criadoEm)}</span>
         </div>
-        <div style="font-size:11.5px; color:var(--muted);">${formatarAlteracoesLog(entrada)}</div>
+        <div style="width:100%;">${formatarAlteracoesLog(entrada, { compacto: true })}</div>
       </div>
     `).join('');
   } catch (e) {
