@@ -281,26 +281,6 @@ const MS_DIA = 24 * MS_HORA;
 const MS_ONLINE = 5 * 60 * 1000;
 
 // ==========================================================================
-// O QUE CONTA COMO "ERRO" nas métricas do painel (card "Erros hoje", gráfico
-// "Erros por hora", "erros-por-rota", "rotas-populares" e na detecção de
-// rota com taxa de erro alta que alimenta Alertas). Usado em TODAS essas
-// queries — um lugar só decide a régua, pra nunca ficar uma métrica
-// discordando de outra sobre o que é ou não erro.
-//
-// status_code >= 400, MAS excluindo 401 e 403 de propósito: esses dois são
-// autenticação/autorização REJEITANDO CORRETAMENTE quem não tinha
-// permissão — o servidor fez exatamente o que devia, não é uma falha.
-// Antes disso, um 401 de alguém testando o painel sem token (ou com token
-// vencido) contava igual a um 500 de verdade: como o painel bate em ~12
-// endpoints a cada ciclo de auto-refresh, isso inflava "erros" com volume
-// alto e constante sem sinalizar problema nenhum — foi exatamente o que
-// gerou o pico de "Erros por hora" investigado antes de existir esta
-// constante. 404/422/429/500 etc. continuam contando normalmente: esses
-// sim tendem a indicar algo pra investigar (rota errada, payload
-// inválido, rate limit, bug no servidor).
-const CONDICAO_SQL_ERRO = "status_code >= 400 AND status_code NOT IN (401, 403)";
-
-// ==========================================================================
 // O QUE CONTA COMO "FORA DO ESCOPO DO APP" numa rota — tentativa de acesso
 // a arquivo interno (.env, .git, chaves SSH) ou a caminho que este app
 // nunca serviu (painel de outra stack, extensão de outra linguagem) e
@@ -309,7 +289,9 @@ const CONDICAO_SQL_ERRO = "status_code >= 400 AND status_code NOT IN (401, 403)"
 // linha a linha), /dashboard/seguranca/ips (mais um sinal por IP, somado
 // aos já existentes) e /dashboard/acessos-indevidos (visão agregada por
 // rota) — um classificador só, pros três concordarem sobre o que é ou não
-// suspeito, mesmo raciocínio de CONDICAO_SQL_ERRO acima.
+// suspeito — mesmo raciocínio de "isso não é uma falha de verdade" que
+// também rege CONDICAO_SQL_ERRO, definido logo abaixo (depende deste
+// classificador, por isso vem depois, não antes).
 //
 // Dois jeitos de uma rota ser LEGÍTIMA (tudo o resto é sinalizado):
 //
@@ -410,6 +392,59 @@ function classificarRotaSuspeita(rota, statusCode) {
 
     return "fora do escopo do app";
 }
+
+// Expõe classificarRotaSuspeita direto pro SQL, como função escalar do
+// SQLite (better-sqlite3 suporta registrar função JS nativa) — em vez de
+// reescrever a mesma lógica (prefixos, regex de assinatura, o critério
+// especial de /api/admin) como uma condição SQL separada, só pra usar
+// dentro de CONDICAO_SQL_ERRO logo abaixo. Um classificador, chamável dos
+// dois lados (JS puro em /dashboard/requests|seguranca/ips|acessos-
+// indevidos; SQL aqui) — nunca diverge. `deterministic: true` porque é
+// função pura (mesma entrada, mesma saída sempre), permite o SQLite
+// otimizar/cachear a chamada quando possível.
+db.function("rotaEhSuspeita", { deterministic: true }, (rota, statusCode) => {
+    return classificarRotaSuspeita(rota, statusCode) !== null ? 1 : 0;
+});
+
+// ==========================================================================
+// O QUE CONTA COMO "ERRO" nas métricas do painel (card "Erros hoje", gráfico
+// "Erros por hora", "erros-por-rota", "rotas-populares" e na detecção de
+// rota com taxa de erro alta que alimenta Alertas). Usado em TODAS essas
+// queries — um lugar só decide a régua, pra nunca ficar uma métrica
+// discordando de outra sobre o que é ou não erro.
+//
+// status_code >= 400, MAS excluindo duas categorias que não são falha da
+// aplicação — o servidor fez exatamente o que devia:
+//
+// - 401/403: autenticação/autorização REJEITANDO CORRETAMENTE quem não
+//   tinha permissão. Antes disso, um 401 de alguém testando o painel sem
+//   token (ou com token vencido) contava igual a um 500 de verdade: como
+//   o painel bate em ~12 endpoints a cada ciclo de auto-refresh, isso
+//   inflava "erros" com volume alto e constante sem sinalizar problema
+//   nenhum — foi exatamente o que gerou o pico de "Erros por hora"
+//   investigado antes de existir esta constante.
+//
+// - Rota sinalizada por classificarRotaSuspeita/rotaEhSuspeita (acima):
+//   varredura automatizada batendo em caminho que este app nunca serviu
+//   (ex: sonda de RCE em Struts/PHP, injeção OGNL, tentativa de pegar
+//   .env/.git) sempre vai dar 404 aqui — não porque a aplicação tem
+//   algum bug, mas porque aquele caminho simplesmente não existe e nunca
+//   existiu. Sem essa exclusão, "Erros hoje" ficava poluído com ruído de
+//   internet (scanners automatizados testando o servidor o tempo todo)
+//   em vez de mostrar só o que de fato merece investigação — o mesmo
+//   raciocínio do 401/403 acima, uma categoria a mais de "o servidor
+//   reagiu certo a algo que não é sobre o app".
+//
+// 404/422/429/500 etc. em rota LEGÍTIMA do app continuam contando
+// normalmente: esses sim tendem a indicar algo pra investigar (rota
+// errada, payload inválido, rate limit, bug no servidor).
+//
+// CONDICAO_SQL_NAO_E_ERRO_REAL fica separada (não só embutida dentro de
+// CONDICAO_SQL_ERRO) porque /dashboard/erros-por-rota precisa da mesma
+// exclusão numa variante com faixa (4xx vs 5xx) que CONDICAO_SQL_ERRO não
+// cobre sozinha — ver total4xx logo abaixo.
+const CONDICAO_SQL_NAO_E_ERRO_REAL = "status_code NOT IN (401, 403) AND rotaEhSuspeita(rota, status_code) = 0";
+const CONDICAO_SQL_ERRO = `status_code >= 400 AND ${CONDICAO_SQL_NAO_E_ERRO_REAL}`;
 
 // GET /api/admin/dashboard/data
 router.get("/dashboard/data", exigirNivel('ver'), (req, res) => {
@@ -938,7 +973,7 @@ router.get("/dashboard/erros-por-rota", exigirNivel('ver'), (req, res) => {
             metodo,
             rota,
             COUNT(*) AS totalRequests,
-            SUM(CASE WHEN status_code >= 400 AND status_code < 500 AND status_code NOT IN (401, 403) THEN 1 ELSE 0 END) AS total4xx,
+            SUM(CASE WHEN status_code >= 400 AND status_code < 500 AND ${CONDICAO_SQL_NAO_E_ERRO_REAL} THEN 1 ELSE 0 END) AS total4xx,
             SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS total5xx,
             MAX(CASE WHEN ${CONDICAO_SQL_ERRO} THEN criado_em END) AS ultimoErroEm
         FROM request_logs
