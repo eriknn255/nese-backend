@@ -277,14 +277,13 @@
     </section>
 
     <!-- ==================== ABA: REQUESTS ==================== -->
-    <!-- Só o essencial de tráfego HTTP: "Requests recentes" (tudo, sem
-         filtro) e "Requests por IP" (agregado, com sinalização de
-         suspeita). "Concentração por região" e "Acessos indevidos" — as
-         duas leituras DERIVADAS desse mesmo sinal de segurança — moraram
-         aqui por um tempo, mas foram pra aba "Segurança" (logo ao lado na
-         barra lateral), que é o lugar mais natural pra elas. O seletor de
-         "Janela" abaixo governa só "Requests por IP" aqui; a aba
-         "Segurança" tem o seu próprio, independente. -->
+    <!-- Exclusivamente tráfego HTTP bruto — toda request, sem julgamento
+         de segurança. Sinalização de IP suspeito, agregação por região e
+         acessos indevidos por rota moram inteiramente na aba "Segurança"
+         (ver comentário lá). Sem sub-seção aqui: só "Requests recentes",
+         ocupando o espaço inteiro da aba — de propósito, pra não virar
+         de novo um meio-termo entre tráfego geral e investigação de
+         segurança. -->
     <section class="aba-conteudo" id="aba-requests" hidden>
       <div class="section-title">Requests recentes <span class="section-note">(rota, status, IP, porta — todo o tráfego HTTP)</span></div>
       <div class="table-toolbar">
@@ -292,7 +291,7 @@
         <button type="button" id="requests-exportar-btn" class="toolbar-btn">Exportar CSV</button>
         <button type="button" id="requests-limpar-btn" class="toolbar-btn toolbar-btn-perigo" title="Remove da tabela todo request_log com mais de 90 dias (mesma janela do job automático)">Limpar logs antigos</button>
       </div>
-      <div class="requests-panel" id="requests-panel">
+      <div class="requests-panel requests-panel-unico" id="requests-panel">
         <table>
           <thead>
             <tr>
@@ -313,8 +312,19 @@
       <div class="carregar-mais-row">
         <button type="button" id="requests-carregar-mais-btn" class="toolbar-btn" hidden>Carregar mais</button>
       </div>
+    </section>
 
-      <div class="section-title">Requests por IP <span class="section-note">(volume e densidade de requests por IP)</span></div>
+    <!-- ==================== ABA: SEGURANÇA ==================== -->
+    <!-- As três leituras do mesmo sinal (ver classificarRotaSuspeita e
+         GET /dashboard/seguranca/ips em admin.js) moram todas aqui:
+         "Requests por IP" (lista crua, com sinalização por IP),
+         "Requests Suspeitos" (agregado por rota) e "Concentração por
+         região" (agregado geográfico). Não fica mais nada de segurança
+         em outra aba — quem quiser investigar um IP/rota suspeito acha
+         tudo num lugar só, do mais específico (linha por IP) ao mais
+         panorâmico (região). -->
+    <section class="aba-conteudo" id="aba-seguranca" hidden>
+      <div class="section-title">Segurança </div>
       <div class="table-toolbar">
         <label for="seguranca-janela" class="table-toolbar-label">Janela</label>
         <select id="seguranca-janela">
@@ -325,6 +335,8 @@
         </select>
         <span class="search-count" id="seguranca-resumo"></span>
       </div>
+
+      <div class="section-title">Requests por IP <span class="section-note">(volume e densidade de requests por IP)</span></div>
       <div class="requests-panel">
         <table>
           <thead>
@@ -342,32 +354,6 @@
             <tr><td colspan="7" class="empty-state">carregando…</td></tr>
           </tbody>
         </table>
-      </div>
-    </section>
-
-    <!-- ==================== ABA: SEGURANÇA ==================== -->
-    <!-- As duas leituras DERIVADAS do mesmo sinal de segurança (ver
-         classificarRotaSuspeita e /dashboard/seguranca/ips em admin.js) —
-         moraram um tempo dentro da aba "Requests", mas essa é a casa
-         natural delas. "Acessos indevidos" primeiro (o que É uma
-         tentativa de invasão, sem ambiguidade — arquivo interno, painel
-         de outra stack, token de admin errado), "Concentração por região"
-         depois (mais um recorte pra contextualizar os IPs já listados em
-         "Requests por IP", não uma sinalização em si). Seletor de janela
-         próprio, independente do que fica na aba "Requests" — sincronizado
-         com aquele (mesma chave em localStorage, os dois sempre mostram o
-         mesmo valor), mas mudar um não obriga a pessoa a estar na mesma
-         aba do outro pra decidir a janela de tempo. -->
-    <section class="aba-conteudo" id="aba-seguranca" hidden>
-      <div class="section-title">Segurança </div>
-      <div class="table-toolbar">
-        <label for="seguranca-janela-2" class="table-toolbar-label">Janela</label>
-        <select id="seguranca-janela-2">
-          <option value="15">Últimos 15 min</option>
-          <option value="60">Última 1h</option>
-          <option value="360">Últimas 6h</option>
-          <option value="1440">Últimas 24h</option>
-        </select>
       </div>
 
       <div class="section-title">Requests Suspeitos <span class="section-note">(caminhos fora do que o app expõe — arquivo interno, painel de outra stack, varredura, token de admin errado — agrupados por rota)</span></div>
