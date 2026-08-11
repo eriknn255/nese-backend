@@ -279,6 +279,21 @@
     flex-wrap: wrap;
   }
 
+  /* .table-toolbar com "justify-content: space-between" só funciona bem
+     quando um dos itens tem "flex: 1" (ex: .table-busca) — aí ele
+     consome sozinho o espaço livre e empurra o resto pra ponta direita.
+     Sem um item assim (ex: só label + select + resumo, como em
+     "Segurança"), space-between distribui o espaço livre IGUALMENTE
+     entre cada par de itens, deixando o item do meio largado longe dos
+     outros dois em vez de grudado num dos lados — daí esta variante:
+     agrupa tudo pra ponta direita, oposta ao título/subtítulo da seção
+     (que fica à esquerda, fora deste container). Usar sempre que o
+     toolbar não tiver um elemento com flex:1 pra ancorar o layout
+     sozinho. */
+  .table-toolbar-direita {
+    justify-content: flex-end;
+  }
+
   .table-busca {
     flex: 1;
     min-width: 200px;
