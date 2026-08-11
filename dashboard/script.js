@@ -2160,12 +2160,14 @@ function renderSegurancaErro(mensagem) {
 
 // Janela de tempo lida do <select> — persistida em localStorage (mesmo
 // padrão de refresh-interval-select) pra sobreviver a um refresh de
-// página sem voltar pro padrão de 15min toda vez. Dois <select>s na tela
-// agora (um na aba "Requests", outro na aba "Segurança" — ver
-// initSelectsJanela mais abaixo), sempre sincronizados entre si; a fonte
-// de verdade é o localStorage, não um dos dois elementos.
+// página sem voltar pro padrão de 15min toda vez. Um único <select> agora
+// (aba "Segurança" é a única dona de "Requests por IP" — ver comentário
+// na aba "Requests" do index.html); o array continua existindo (em vez
+// de virar uma const string) só pra não precisar reescrever
+// initSelectsJanela/carregarSeguranca se um dia outro seletor de janela
+// precisar se sincronizar com este.
 const SEGURANCA_JANELA_KEY = 'mase-seguranca-janela-minutos';
-const IDS_SELECT_JANELA = ['seguranca-janela', 'seguranca-janela-2'];
+const IDS_SELECT_JANELA = ['seguranca-janela'];
 
 function obterJanelaSeguranca() {
   try {
