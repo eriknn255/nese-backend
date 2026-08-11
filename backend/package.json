@@ -1,7 +1,7 @@
 {
-  "name": "mase-backend",
+  "name": "nese-backend",
   "version": "1.0.0",
-  "description": "Backend do REFLEXO/Mase — Express + SQLite",
+  "description": "Backend do Nese — Express + SQLite",
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
@@ -17,9 +17,7 @@
     "fluent-ffmpeg": "^2.1.3",
     "google-auth-library": "^9.14.1",
     "jsonwebtoken": "^9.0.3",
-    "markdown-it": "^14.3.0",
     "multer": "^2.2.0",
-    "sanitize-html": "^2.17.6",
     "sharp": "^0.35.3",
     "uuid": "^9.0.1"
   }
