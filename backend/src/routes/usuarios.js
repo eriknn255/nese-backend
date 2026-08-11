@@ -91,7 +91,7 @@ const SELECT_USUARIO = "SELECT id, nome, email, telefone, cpf_cnpj AS cpfCnpj, a
 // nada, só confiava no que a pessoa digitava). Isso só funciona rodando
 // como site normal (fora do WebView do app Android) — Google recusa OAuth
 // dentro de WebView embutida de propósito, desde 2016. Ver conversa sobre
-// isso: quando o REFLEXO virar app de novo, essa tela de login precisa
+// isso: quando o Nese virar app de novo, essa tela de login precisa
 // abrir numa Custom Tab (ou usar o SDK nativo), não dentro da WebView.
 //
 // GOOGLE_CLIENT_ID precisa ser o MESMO Client ID configurado no front
