@@ -332,6 +332,13 @@
     border-radius: 6px;
   }
 
+  /* Única tabela da aba "Requests" agora (ver index.html) — sem uma
+     segunda seção dividindo o espaço abaixo, dá pra abrir mais altura
+     antes de precisar rolar. */
+  .requests-panel-unico {
+    max-height: 640px;
+  }
+
   .requests-panel table {
     border: none;
     border-radius: 0;
