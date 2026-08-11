@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const db = require("../db");
+const { registrarAuditoria, diffCampos } = require("../utils/auditoria");
 const { obterLocalizacoesEmLote } = require("../utils/ipLocalizacao");
 const { temAlgumaCapa } = require("../utils/midia");
 const { limparRequestLogsAntigos } = require("../jobs/limparRequestLogs");
@@ -2228,9 +2229,9 @@ function normalizarDiasSemanaModeracao(diasSemana) {
 }
 
 // ==========================================================================
-// AUDITORIA — ver tabela log_auditoria_moderacao em db.js pro raciocínio
-// completo (por que não tem FK, por que "moderador" é só um nome digitado
-// e não um usuário de verdade).
+// AUDITORIA — ver utils/auditoria.js pro raciocínio completo (por que a
+// mesma tabela cobre moderação E ações do próprio usuário, por que
+// "moderador" aqui é só um nome digitado e não um usuário de verdade).
 //
 // nomeModerador: lê o header X-Admin-Nome (mandado pelo front — ver
 // #admin-nome/chamarApi em moderacao/script.js). Não autentica nada (só
@@ -2240,29 +2241,6 @@ function normalizarDiasSemanaModeracao(diasSemana) {
 function nomeModerador(req) {
     const bruto = sanitizarTextoModeracao(req.header("X-Admin-Nome"), 60);
     return bruto || "desconhecido";
-}
-
-function registrarAuditoria({ moderador, acao, entidadeTipo, entidadeId, alteracoes }) {
-    db.prepare(`
-        INSERT INTO log_auditoria_moderacao (moderador, acao, entidade_tipo, entidade_id, alteracoes, criado_em)
-        VALUES (?, ?, ?, ?, ?, ?)
-    `).run(moderador, acao, entidadeTipo, entidadeId, alteracoes ? JSON.stringify(alteracoes) : null, Date.now());
-}
-
-// Monta { campo: { de, para } } só dos campos que de fato mudaram — evita
-// gravar "editou" com um diff vazio quando o PATCH reenvia os mesmos
-// valores (comum quando o front manda o form inteiro de volta).
-function diffCampos(antes, depois) {
-    const alteracoes = {};
-    for (const campo of Object.keys(depois)) {
-        const valorAntes = antes[campo];
-        const valorDepois = depois[campo];
-        const igual = Array.isArray(valorDepois)
-            ? JSON.stringify(valorAntes) === JSON.stringify(valorDepois)
-            : valorAntes === valorDepois;
-        if (!igual) alteracoes[campo] = { de: valorAntes ?? null, para: valorDepois ?? null };
-    }
-    return Object.keys(alteracoes).length > 0 ? alteracoes : null;
 }
 
 // GET /api/admin/moderacao/prestadores?busca=&limit=
@@ -2385,7 +2363,7 @@ router.patch("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
     );
     if (alteracoes) {
         registrarAuditoria({
-            moderador: nomeModerador(req), acao: "editar",
+            ator: nomeModerador(req), origem: 'moderacao', acao: "editar",
             entidadeTipo: "prestador", entidadeId: req.params.id, alteracoes
         });
     }
@@ -2401,7 +2379,7 @@ router.delete("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
 
     db.prepare("DELETE FROM prestadores WHERE id = ?").run(req.params.id);
     registrarAuditoria({
-        moderador: nomeModerador(req), acao: "excluir",
+        ator: nomeModerador(req), origem: 'moderacao', acao: "excluir",
         entidadeTipo: "prestador", entidadeId: req.params.id, alteracoes: linha
     });
     res.status(204).end();
@@ -2459,7 +2437,7 @@ router.patch("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
     );
     if (alteracoesUsuario) {
         registrarAuditoria({
-            moderador: nomeModerador(req), acao: "editar",
+            ator: nomeModerador(req), origem: 'moderacao', acao: "editar",
             entidadeTipo: "usuario", entidadeId: req.params.id, alteracoes: alteracoesUsuario
         });
     }
@@ -2506,7 +2484,7 @@ router.delete("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
     // nada de nome/e-mail/telefone sobrevivendo aqui, só o suficiente pra
     // provar QUE a conta existiu e quando foi excluída.
     registrarAuditoria({
-        moderador: nomeModerador(req), acao: "excluir",
+        ator: nomeModerador(req), origem: 'moderacao', acao: "excluir",
         entidadeTipo: "usuario", entidadeId: req.params.id,
         alteracoes: { criadoEm: usuario.criado_em }
     });
@@ -2534,26 +2512,30 @@ router.get("/moderacao/log", exigirAdmin, (req, res) => {
         ? req.query.entidadeTipo
         : null;
     const entidadeId = entidadeTipo ? sanitizarTextoModeracao(req.query.entidadeId, 100) : null;
+    const origemFiltro = req.query.origem === "moderacao" || req.query.origem === "usuario"
+        ? req.query.origem
+        : null;
 
-    let linhas;
+    const condicoes = [];
+    const params = [];
     if (entidadeTipo && entidadeId) {
-        linhas = db.prepare(`
-            SELECT id, moderador, acao, entidade_tipo AS entidadeTipo, entidade_id AS entidadeId,
-                   alteracoes, criado_em AS criadoEm
-            FROM log_auditoria_moderacao
-            WHERE entidade_tipo = ? AND entidade_id = ?
-            ORDER BY criado_em DESC
-            LIMIT ?
-        `).all(entidadeTipo, entidadeId, limite);
-    } else {
-        linhas = db.prepare(`
-            SELECT id, moderador, acao, entidade_tipo AS entidadeTipo, entidade_id AS entidadeId,
-                   alteracoes, criado_em AS criadoEm
-            FROM log_auditoria_moderacao
-            ORDER BY criado_em DESC
-            LIMIT ?
-        `).all(limite);
+        condicoes.push("entidade_tipo = ?", "entidade_id = ?");
+        params.push(entidadeTipo, entidadeId);
     }
+    if (origemFiltro) {
+        condicoes.push("origem = ?");
+        params.push(origemFiltro);
+    }
+    const whereSql = condicoes.length ? `WHERE ${condicoes.join(" AND ")}` : "";
+
+    const linhas = db.prepare(`
+        SELECT id, moderador AS ator, origem, acao, entidade_tipo AS entidadeTipo, entidade_id AS entidadeId,
+               alteracoes, criado_em AS criadoEm
+        FROM log_auditoria_moderacao
+        ${whereSql}
+        ORDER BY criado_em DESC
+        LIMIT ?
+    `).all(...params, limite);
 
     res.json({
         log: linhas.map(l => ({ ...l, alteracoes: l.alteracoes ? JSON.parse(l.alteracoes) : null }))
