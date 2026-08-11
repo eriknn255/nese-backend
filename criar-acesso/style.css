@@ -1,0 +1,177 @@
+/* ==========================================================================
+   CRIAR ACESSO — página de bootstrap, autocontida de propósito: não puxa
+   nada de /dashboard/ nem de /moderacao/. É a única página que precisa
+   funcionar quando nada mais está acessível (sem login, possivelmente num
+   deploy novo), então depender de arquivo de outra pasta seria
+   exatamente o tipo de acoplamento que atrapalha na hora errada.
+   Tokens de cor copiados dos outros painéis pra manter a identidade.
+   ========================================================================== */
+
+:root {
+  --bg: #0c0d10;
+  --panel: #15171b;
+  --border: #24272d;
+  --ink: #e8e9ea;
+  --muted: #7a7f88;
+  --gold: #b07d16;
+  --green: #00b044;
+  --red: #d31200;
+  --font-body: "Google Sans Flex Variable", "Google Sans Flex", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  padding: 24px;
+}
+
+.caixa {
+  width: 100%;
+  max-width: 400px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px 28px;
+}
+
+h1 {
+  font-size: 20px;
+  margin: 12px 0 4px;
+}
+
+.sub {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 20px;
+}
+
+/* ---- Estados de rede (verificando / bloqueado / ok) ---- */
+
+.status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+  background: rgba(122, 127, 136, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+}
+
+.status[hidden] { display: none; }
+
+.status-erro {
+  background: rgba(211, 18, 0, 0.08);
+  border-color: rgba(211, 18, 0, 0.3);
+  color: var(--red);
+}
+
+.status-erro strong { font-size: 13px; }
+
+.status-ok {
+  background: rgba(0, 176, 68, 0.08);
+  border-color: rgba(0, 176, 68, 0.28);
+  color: var(--green);
+}
+
+.ip-visto, .dica {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11.5px;
+  background: rgba(122, 127, 136, 0.15);
+  padding: 1px 5px;
+  border-radius: 3px;
+  word-break: break-all;
+}
+
+/* ---- Formulário ---- */
+
+form[hidden] { display: none; }
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 14px;
+}
+
+label span {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+input, select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  width: 100%;
+}
+
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+button {
+  width: 100%;
+  margin-top: 6px;
+  background: var(--gold);
+  color: var(--bg);
+  border: none;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 11px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:disabled { opacity: 0.6; }
+
+.msg {
+  font-size: 12.5px;
+  color: var(--green);
+  border: 1px solid rgba(0, 176, 68, 0.28);
+  background: rgba(0, 176, 68, 0.08);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.msg[hidden] { display: none; }
+
+.msg-erro {
+  color: var(--red);
+  border-color: rgba(211, 18, 0, 0.3);
+  background: rgba(211, 18, 0, 0.08);
+}
+
+.rodape {
+  margin: 22px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.rodape a { color: var(--gold); }
