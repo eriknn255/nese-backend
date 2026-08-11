@@ -2,7 +2,11 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const express = require("express");
+const jwt = require("jsonwebtoken");
+const { v4: uuidv4 } = require("uuid");
 const db = require("../db");
+const { exigirNivel } = require("../middleware/identidadeAdmin");
+const { hashSenha, verificarSenha } = require("../utils/senha");
 const { registrarAuditoria, diffCampos } = require("../utils/auditoria");
 const { obterLocalizacoesEmLote } = require("../utils/ipLocalizacao");
 const { temAlgumaCapa } = require("../utils/midia");
@@ -11,20 +15,24 @@ const { limparRequestLogsAntigos } = require("../jobs/limparRequestLogs");
 const router = express.Router();
 
 // ==========================================================================
-// PAINEL INTERNO — alimenta o dashboard HTML estático (index.html/style.css/
-// script.js, fora deste repo) que só o Erik acessa. NÃO é uma conta de
-// usuário comum (não passa por identidade.js/JWT de sessão) — é protegido
-// por um token fixo de servidor (ADMIN_TOKEN, ver .env), comparado no
-// header "X-Admin-Token". Simples de propósito: não existe conceito de
-// "usuário admin" no schema hoje, e criar um sistema de roles inteiro só
-// pra isso seria trabalho que essa necessidade não pede ainda.
+// PAINEL INTERNO — alimenta o dashboard e a moderação (fora deste repo:
+// dashboard/ e moderacao/, HTML+CSS+JS estáticos servidos pelo Nginx).
 //
-// SEM ADMIN_TOKEN configurado no .env, a rota inteira responde 500 — nunca
-// abre sem proteção nenhuma "por engano" em produção.
+// DOIS níveis de proteção que NÃO se confundem, apesar de usarem o mesmo
+// nome de header (X-Admin-Token) em rotas diferentes:
+//   1. ADMIN_TOKEN (exigirAdmin, abaixo): segredo fixo do .env, só abre
+//      POST /contas (criar login novo). Ninguém cria login sem esse
+//      segredo — nem um 'full' já logado.
+//   2. Login de verdade (email+senha, tabela `admins`, ver
+//      middleware/identidadeAdmin.js): autentica o resto — dashboard
+//      (nivel 'ver' ou 'full') e moderação (só 'full'). Sessão é um JWT
+//      próprio (ADMIN_SESSION_SECRET), devolvido por POST /login.
 // ==========================================================================
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const ADMIN_TOKEN_BUFFER = ADMIN_TOKEN ? Buffer.from(ADMIN_TOKEN) : null;
+const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET;
 
+// Guarda SÓ POST /contas agora (criar login) — ver comentário acima.
 function exigirAdmin(req, res, next) {
     if (!ADMIN_TOKEN) {
         return res.status(500).json({ erro: "Servidor sem ADMIN_TOKEN configurado (ver .env)." });
@@ -49,6 +57,173 @@ function exigirAdmin(req, res, next) {
     }
     next();
 }
+
+// ==========================================================================
+// LOGIN INTERNO — contas do dashboard/moderação.
+//
+// Fluxo pensado pra que o ADMIN_TOKEN saia do dia a dia: ele passa a ser
+// usado SÓ pra criar login (POST /contas). Depois disso, quem acessa o
+// painel usa email+senha, e o que autentica cada request é o JWT de
+// sessão devolvido pelo /login — não o segredo do .env. Assim o segredo
+// não fica colado no localStorage de todo mundo que precisa ver métrica,
+// e dá pra revogar acesso de uma pessoa (DELETE /contas/:id) sem trocar
+// o segredo e reconfigurar todo mundo.
+// ==========================================================================
+
+const EXPIRACAO_SESSAO_ADMIN = "12h";
+
+function assinarSessaoAdmin(admin) {
+    return jwt.sign({ sub: admin.id, nivel: admin.nivel }, ADMIN_SESSION_SECRET, { expiresIn: EXPIRACAO_SESSAO_ADMIN });
+}
+
+function normalizarEmailAdmin(valor) {
+    return String(valor || "").trim().toLowerCase();
+}
+
+// POST /api/admin/contas — cria um login novo. ÚNICA rota protegida pelo
+// ADMIN_TOKEN estático. Um 'full' logado NÃO pode criar conta: quem cria
+// acesso precisa do segredo do servidor, ponto — senão bastaria uma conta
+// full vazada pra alguém fabricar acessos permanentes pra si mesmo.
+router.post("/contas", exigirAdmin, (req, res) => {
+    if (!ADMIN_SESSION_SECRET) {
+        return res.status(500).json({ erro: "Servidor sem ADMIN_SESSION_SECRET configurado (ver .env)." });
+    }
+
+    const email = normalizarEmailAdmin(req.body.email);
+    const nome = String(req.body.nome || "").trim().slice(0, 80);
+    const senha = String(req.body.senha || "");
+    const nivel = req.body.nivel === "full" ? "full" : (req.body.nivel === "ver" ? "ver" : null);
+
+    if (!email || !email.includes("@")) return res.status(400).json({ erro: "E-mail inválido." });
+    if (!nome) return res.status(400).json({ erro: "nome é obrigatório." });
+    if (!nivel) return res.status(400).json({ erro: "nivel precisa ser 'ver' ou 'full'." });
+    // 10 caracteres: é um login interno de poucas pessoas, dá pra exigir
+    // senha decente sem atrapalhar ninguém.
+    if (senha.length < 10) return res.status(400).json({ erro: "A senha precisa ter pelo menos 10 caracteres." });
+
+    const jaExiste = db.prepare("SELECT id FROM admins WHERE email = ?").get(email);
+    if (jaExiste) return res.status(409).json({ erro: "Já existe um login com esse e-mail." });
+
+    const conta = {
+        id: uuidv4(),
+        email,
+        nome,
+        senha_hash: hashSenha(senha),
+        nivel,
+        criado_em: Date.now(),
+        // Se quem criou já estava logado, guarda o e-mail dele; se veio só
+        // com o ADMIN_TOKEN puro (caso normal da primeira conta), fica
+        // 'ADMIN_TOKEN' mesmo — é a verdade do que aconteceu.
+        criado_por: req.admin ? req.admin.email : "ADMIN_TOKEN"
+    };
+
+    db.prepare(`
+        INSERT INTO admins (id, email, nome, senha_hash, nivel, criado_em, criado_por)
+        VALUES (@id, @email, @nome, @senha_hash, @nivel, @criado_em, @criado_por)
+    `).run(conta);
+
+    res.status(201).json({ id: conta.id, email: conta.email, nome: conta.nome, nivel: conta.nivel, criadoEm: conta.criado_em });
+});
+
+// POST /api/admin/login — email+senha, devolve o JWT de sessão. NÃO passa
+// por exigirAdmin de propósito: é justamente a rota que existe pra quem
+// não tem o segredo do servidor conseguir entrar.
+router.post("/login", (req, res) => {
+    if (!ADMIN_SESSION_SECRET) {
+        return res.status(500).json({ erro: "Servidor sem ADMIN_SESSION_SECRET configurado (ver .env)." });
+    }
+
+    const email = normalizarEmailAdmin(req.body.email);
+    const senha = String(req.body.senha || "");
+    const conta = db.prepare("SELECT * FROM admins WHERE email = ?").get(email);
+
+    // Mesma mensagem pros dois casos (e-mail inexistente / senha errada) —
+    // não entrega pra quem está tentando adivinhar quais e-mails existem.
+    // verificarSenha roda mesmo sem conta encontrada pra não vazar por
+    // timing que o e-mail não existe (scrypt é caro; responder instantâneo
+    // só quando o e-mail é desconhecido seria um sinal claro).
+    const hashParaChecar = conta ? conta.senha_hash : hashSenha("senha-descartavel-so-pra-gastar-o-mesmo-tempo");
+    const senhaOk = verificarSenha(senha, hashParaChecar);
+
+    if (!conta || !senhaOk) {
+        return res.status(401).json({ erro: "E-mail ou senha inválidos." });
+    }
+
+    res.json({
+        token: assinarSessaoAdmin(conta),
+        admin: { id: conta.id, email: conta.email, nome: conta.nome, nivel: conta.nivel }
+    });
+});
+
+// GET /api/admin/eu — quem sou eu / meu nível. O front chama isso logo
+// depois do login pra decidir o que mostrar (esconder a moderação de quem
+// é 'ver'), e pra detectar sessão expirada sem ter que disparar uma rota
+// de dados qualquer só pra ver se dá 401.
+router.get("/eu", exigirNivel('ver'), (req, res) => {
+    res.json({ admin: req.admin });
+});
+
+// GET /api/admin/contas — lista os logins existentes (sem hash de senha,
+// obviamente). Só 'full': quem é 'ver' não precisa saber quem mais tem
+// acesso ao painel.
+router.get("/contas", exigirNivel('full'), (req, res) => {
+    const contas = db.prepare(`
+        SELECT id, email, nome, nivel, criado_em AS criadoEm, criado_por AS criadoPor
+        FROM admins ORDER BY criado_em DESC
+    `).all();
+    res.json({ contas });
+});
+
+// DELETE /api/admin/contas/:id — revoga um login. Como identificarAdmin
+// recheca o banco a cada request (ver middleware/identidadeAdmin.js), a
+// sessão da pessoa excluída morre na request seguinte, sem esperar o JWT
+// expirar sozinho.
+router.delete("/contas/:id", exigirNivel('full'), (req, res) => {
+    const conta = db.prepare("SELECT id, email FROM admins WHERE id = ?").get(req.params.id);
+    if (!conta) return res.status(404).json({ erro: "Login não encontrado." });
+
+    // Não deixa apagar o próprio login: evita o cenário bobo de alguém se
+    // trancar do lado de fora e precisar do ADMIN_TOKEN pra voltar.
+    if (req.admin.id === conta.id) {
+        return res.status(400).json({ erro: "Não dá pra excluir o próprio login." });
+    }
+
+    // Nem apagar o último 'full' que sobrou — senão ninguém mais consegue
+    // acessar a moderação, nem criar/remover contas, sem recorrer ao
+    // ADMIN_TOKEN de novo.
+    const contaAlvo = db.prepare("SELECT nivel FROM admins WHERE id = ?").get(req.params.id);
+    if (contaAlvo.nivel === "full") {
+        const totalFull = db.prepare("SELECT COUNT(*) AS total FROM admins WHERE nivel = 'full'").get().total;
+        if (totalFull <= 1) {
+            return res.status(400).json({ erro: "Esse é o último login 'full' — crie outro antes de excluir este." });
+        }
+    }
+
+    db.prepare("DELETE FROM admins WHERE id = ?").run(req.params.id);
+    res.status(204).end();
+});
+
+// POST /api/admin/trocar-senha — a própria pessoa troca a sua senha
+// (precisa da senha atual). Trocar senha de OUTRA pessoa não existe de
+// propósito: se alguém esqueceu, o caminho é criar um login novo com o
+// ADMIN_TOKEN e excluir o antigo — sem rota que permita sequestrar conta
+// alheia.
+router.post("/trocar-senha", exigirNivel('ver'), (req, res) => {
+    const senhaAtual = String(req.body.senhaAtual || "");
+    const senhaNova = String(req.body.senhaNova || "");
+
+    if (senhaNova.length < 10) {
+        return res.status(400).json({ erro: "A senha nova precisa ter pelo menos 10 caracteres." });
+    }
+
+    const conta = db.prepare("SELECT senha_hash FROM admins WHERE id = ?").get(req.admin.id);
+    if (!conta || !verificarSenha(senhaAtual, conta.senha_hash)) {
+        return res.status(401).json({ erro: "Senha atual incorreta." });
+    }
+
+    db.prepare("UPDATE admins SET senha_hash = ? WHERE id = ?").run(hashSenha(senhaNova), req.admin.id);
+    res.status(204).end();
+});
 
 // Lê ?limit= da query string, com um teto (LIMITE_MAXIMO) pra ninguém
 // pedir "limit=999999999" e forçar um SELECT gigante — sempre volta um
@@ -206,7 +381,7 @@ function classificarRotaSuspeita(rota, statusCode) {
 }
 
 // GET /api/admin/dashboard/data
-router.get("/dashboard/data", exigirAdmin, (req, res) => {
+router.get("/dashboard/data", exigirNivel('ver'), (req, res) => {
     const agora = Date.now();
     const inicioHoje = agora - MS_DIA;
 
@@ -306,7 +481,7 @@ router.get("/dashboard/data", exigirAdmin, (req, res) => {
 // Usa latitude/longitude CRUS (não pais/estado/municipio) pelo mesmo
 // motivo do endpoint de prestadores: o heatmap precisa dos pontos
 // individuais, agregar por município perderia a distribuição interna.
-router.get("/dashboard/localizacao", exigirAdmin, (req, res) => {
+router.get("/dashboard/localizacao", exigirNivel('ver'), (req, res) => {
     const porPais = db.prepare(`
         SELECT pais, COUNT(*) AS total FROM log_cadastros
         WHERE pais IS NOT NULL GROUP BY pais ORDER BY total DESC
@@ -344,7 +519,7 @@ router.get("/dashboard/localizacao", exigirAdmin, (req, res) => {
 // pais/estado/municipio: join com o registro de cadastro (log_cadastros)
 // dessa conta — mesmo dado usado em /dashboard/localizacao, aqui por
 // linha, pra aparecer na lista e no modal de detalhes sem outra chamada.
-router.get("/dashboard/usuarios", exigirAdmin, (req, res) => {
+router.get("/dashboard/usuarios", exigirNivel('ver'), (req, res) => {
     const agora = Date.now();
 
     const linhas = db.prepare(`
@@ -394,7 +569,7 @@ router.get("/dashboard/usuarios", exigirAdmin, (req, res) => {
 // notificações não lidas). Nenhuma dessas contagens existia formatada
 // em outro endpoint — são só COUNT(*) diretos, sem custo real mesmo
 // puxados um a um.
-router.get("/dashboard/usuarios/:id", exigirAdmin, (req, res) => {
+router.get("/dashboard/usuarios/:id", exigirNivel('ver'), (req, res) => {
     const agora = Date.now();
 
     const usuario = db.prepare(`
@@ -456,7 +631,7 @@ router.get("/dashboard/usuarios/:id", exigirAdmin, (req, res) => {
 const LIMITE_REQUESTS_PADRAO = 100;
 const LIMITE_REQUESTS_MAXIMO = 2000;
 
-router.get("/dashboard/requests", exigirAdmin, (req, res) => {
+router.get("/dashboard/requests", exigirNivel('ver'), (req, res) => {
     const limite = lerLimite(req, LIMITE_REQUESTS_PADRAO, LIMITE_REQUESTS_MAXIMO);
 
     const linhas = db.prepare(`
@@ -497,7 +672,7 @@ router.get("/dashboard/requests", exigirAdmin, (req, res) => {
 // Só afeta request_logs — log_cadastros e auditoria_contas são histórico/
 // auditoria (ver comentário completo em jobs/limparRequestLogs.js) e não
 // têm rota de limpeza nenhuma, manual ou automática, de propósito.
-router.delete("/dashboard/requests", exigirAdmin, (req, res) => {
+router.delete("/dashboard/requests", exigirNivel('full'), (req, res) => {
     try {
         const { removidas, retencaoDias } = limparRequestLogsAntigos();
         res.json({ removidas, retencaoDias });
@@ -521,7 +696,7 @@ router.delete("/dashboard/requests", exigirAdmin, (req, res) => {
 const LIMITE_LOGS_CADASTRO_PADRAO = 100;
 const LIMITE_LOGS_CADASTRO_MAXIMO = 2000;
 
-router.get("/dashboard/logs-cadastro", exigirAdmin, (req, res) => {
+router.get("/dashboard/logs-cadastro", exigirNivel('ver'), (req, res) => {
     const limite = lerLimite(req, LIMITE_LOGS_CADASTRO_PADRAO, LIMITE_LOGS_CADASTRO_MAXIMO);
 
     const linhas = db.prepare(`
@@ -611,7 +786,7 @@ function lerHoras(req) {
 //   status, 2xx/3xx/4xx/5xx), sempre fixa em 24h — é sobre a "foto" do
 //   tráfego recente, não sobre a janela ajustável de `horas`.
 // ==========================================================================
-router.get("/dashboard/graficos/tecnicos", exigirAdmin, (req, res) => {
+router.get("/dashboard/graficos/tecnicos", exigirNivel('ver'), (req, res) => {
     const horas = lerHoras(req);
     const desde = Date.now() - horas * MS_HORA;
 
@@ -694,7 +869,7 @@ router.get("/dashboard/graficos/tecnicos", exigirAdmin, (req, res) => {
 // média já é um sinal útil o bastante pra "essa rota está lenta?" numa
 // janela de algumas horas, sem precisar de infra de métricas dedicada.
 // ==========================================================================
-router.get("/dashboard/rotas-populares", exigirAdmin, (req, res) => {
+router.get("/dashboard/rotas-populares", exigirNivel('ver'), (req, res) => {
     const horas = lerHoras(req);
     const desde = Date.now() - horas * MS_HORA;
 
@@ -723,7 +898,7 @@ router.get("/dashboard/rotas-populares", exigirAdmin, (req, res) => {
     res.json({ porRota, horas });
 });
 
-router.get("/dashboard/erros-por-rota", exigirAdmin, (req, res) => {
+router.get("/dashboard/erros-por-rota", exigirNivel('ver'), (req, res) => {
     const horas = lerHoras(req);
     const desde = Date.now() - horas * MS_HORA;
 
@@ -781,7 +956,7 @@ router.get("/dashboard/erros-por-rota", exigirAdmin, (req, res) => {
 const LIMITE_ERROS_HOJE_PADRAO = 100;
 const LIMITE_ERROS_HOJE_MAXIMO = 2000;
 
-router.get("/dashboard/erros-hoje", exigirAdmin, (req, res) => {
+router.get("/dashboard/erros-hoje", exigirNivel('ver'), (req, res) => {
     const limite = lerLimite(req, LIMITE_ERROS_HOJE_PADRAO, LIMITE_ERROS_HOJE_MAXIMO);
     const desde = Date.now() - MS_DIA;
 
@@ -833,7 +1008,7 @@ router.get("/dashboard/erros-hoje", exigirAdmin, (req, res) => {
 //   Ambas expostas porque respondem perguntas diferentes; o front decide
 //   qual mostrar.
 // ==========================================================================
-router.get("/dashboard/graficos/comercial", exigirAdmin, (req, res) => {
+router.get("/dashboard/graficos/comercial", exigirNivel('ver'), (req, res) => {
     const diasBruto = Number.parseInt(req.query.dias, 10);
     const dias = (Number.isFinite(diasBruto) && diasBruto > 0)
         ? Math.min(diasBruto, DIAS_CADASTROS_MAXIMO)
@@ -925,7 +1100,7 @@ const MS_SEMANA = 7 * MS_DIA;
 const SEMANAS_RETENCAO_PADRAO = 8;
 const SEMANAS_RETENCAO_MAXIMO = 26;
 
-router.get("/dashboard/retencao", exigirAdmin, (req, res) => {
+router.get("/dashboard/retencao", exigirNivel('ver'), (req, res) => {
     const semanasBruto = Number.parseInt(req.query.semanas, 10);
     const semanas = (Number.isFinite(semanasBruto) && semanasBruto > 0)
         ? Math.min(semanasBruto, SEMANAS_RETENCAO_MAXIMO)
@@ -1020,7 +1195,7 @@ router.get("/dashboard/retencao", exigirAdmin, (req, res) => {
 // mesmo princípio nas 3 (dono_usuario_id / autor_usuario_id / usuario_id),
 // cada uma na tabela certa.
 // ==========================================================================
-router.get("/dashboard/funil", exigirAdmin, (req, res) => {
+router.get("/dashboard/funil", exigirNivel('ver'), (req, res) => {
     const { total: totalUsuarios } = db.prepare(
         "SELECT COUNT(*) AS total FROM usuarios"
     ).get();
@@ -1088,7 +1263,7 @@ const DIAS_CONTA_MORTA_MAXIMO = 365;
 const LIMITE_CONTAS_MORTAS_PADRAO = 100;
 const LIMITE_CONTAS_MORTAS_MAXIMO = 1000;
 
-router.get("/dashboard/contas-mortas", exigirAdmin, (req, res) => {
+router.get("/dashboard/contas-mortas", exigirNivel('ver'), (req, res) => {
     const diasBruto = Number.parseInt(req.query.dias, 10);
     const dias = (Number.isFinite(diasBruto) && diasBruto > 0)
         ? Math.min(diasBruto, DIAS_CONTA_MORTA_MAXIMO)
@@ -1134,7 +1309,7 @@ router.get("/dashboard/contas-mortas", exigirAdmin, (req, res) => {
 // null se ninguém excluiu no período (evita 0 enganoso, que pareceria
 // "todo mundo excluiu no mesmo instante que criou").
 // ==========================================================================
-router.get("/dashboard/churn", exigirAdmin, (req, res) => {
+router.get("/dashboard/churn", exigirNivel('ver'), (req, res) => {
     const diasBruto = Number.parseInt(req.query.dias, 10);
     const dias = (Number.isFinite(diasBruto) && diasBruto > 0)
         ? Math.min(diasBruto, DIAS_CADASTROS_MAXIMO)
@@ -1191,7 +1366,7 @@ router.get("/dashboard/churn", exigirAdmin, (req, res) => {
 const LIMITE_MODERACAO_PADRAO = 50;
 const LIMITE_MODERACAO_MAXIMO = 500;
 
-router.get("/dashboard/moderacao", exigirAdmin, (req, res) => {
+router.get("/dashboard/moderacao", exigirNivel('ver'), (req, res) => {
     const limite = lerLimite(req, LIMITE_MODERACAO_PADRAO, LIMITE_MODERACAO_MAXIMO);
 
     const { total: totalPendentes } = db.prepare(
@@ -1238,7 +1413,7 @@ router.get("/dashboard/moderacao", exigirAdmin, (req, res) => {
 //   pendente ainda não é uma decisão, não pode contar como "quase
 //   rejeitada" só por ainda não ter sido publicada.
 // ==========================================================================
-router.get("/dashboard/avaliacoes-insights", exigirAdmin, (req, res) => {
+router.get("/dashboard/avaliacoes-insights", exigirNivel('ver'), (req, res) => {
     const { total: totalPublicadas } = db.prepare(
         "SELECT COUNT(*) AS total FROM avaliacoes WHERE status = 'publicada'"
     ).get();
@@ -1292,7 +1467,7 @@ router.get("/dashboard/avaliacoes-insights", exigirAdmin, (req, res) => {
 // intenção de contato) e por categoria (que tipo de serviço mais gera
 // contato).
 // ==========================================================================
-router.get("/dashboard/whatsapp", exigirAdmin, (req, res) => {
+router.get("/dashboard/whatsapp", exigirNivel('ver'), (req, res) => {
     const porPrestador = db.prepare(`
         SELECT p.id, p.nome, p.categoria, COUNT(*) AS totalCliques
         FROM cliques_whatsapp c
@@ -1334,7 +1509,7 @@ router.get("/dashboard/whatsapp", exigirAdmin, (req, res) => {
 // como preenchidos. Migrado pro util compartilhado (usado também em
 // formatarPrestador.js) pra essa checagem existir num lugar só.
 
-router.get("/dashboard/prestadores-incompletos", exigirAdmin, (req, res) => {
+router.get("/dashboard/prestadores-incompletos", exigirNivel('ver'), (req, res) => {
     const linhas = db.prepare(`
         SELECT
             p.id, p.nome, p.categoria, p.descricao,
@@ -1405,7 +1580,7 @@ router.get("/dashboard/prestadores-incompletos", exigirAdmin, (req, res) => {
 // aqui antes perderia a distribuição dentro de um mesmo município grande.
 // Sem paginação de propósito: mesmo o Brasil inteiro de prestadores ainda é
 // um SELECT leve (3 colunas, sem JOIN) comparado às outras rotas do painel.
-router.get("/dashboard/mapa-prestadores", exigirAdmin, (req, res) => {
+router.get("/dashboard/mapa-prestadores", exigirNivel('ver'), (req, res) => {
     const prestadores = db.prepare(`
         SELECT lat, lng, categoria FROM prestadores
         WHERE lat IS NOT NULL AND lng IS NOT NULL
@@ -1423,7 +1598,7 @@ router.get("/dashboard/mapa-prestadores", exigirAdmin, (req, res) => {
 // preenchidos na hora da busca (ver routes/buscas.js), diferente de
 // município/estado/país que dependem do job de geocoding em background —
 // por isso não há WHERE de pendência aqui, todo registro tem ponto.
-router.get("/dashboard/mapa-buscas-sem-resultado", exigirAdmin, (req, res) => {
+router.get("/dashboard/mapa-buscas-sem-resultado", exigirNivel('ver'), (req, res) => {
     const buscas = db.prepare(`
         SELECT lat, lng, categoria FROM buscas_sem_resultado
         WHERE lat IS NOT NULL AND lng IS NOT NULL
@@ -1432,7 +1607,7 @@ router.get("/dashboard/mapa-buscas-sem-resultado", exigirAdmin, (req, res) => {
     res.json({ buscas });
 });
 
-router.get("/dashboard/cobertura", exigirAdmin, (req, res) => {
+router.get("/dashboard/cobertura", exigirNivel('ver'), (req, res) => {
     const usuariosPorMunicipio = db.prepare(`
         SELECT municipio, COUNT(DISTINCT usuario_id) AS totalUsuarios
         FROM log_cadastros
@@ -1479,7 +1654,7 @@ router.get("/dashboard/cobertura", exigirAdmin, (req, res) => {
 // de background — mesmo propósito de prestadoresSemMunicipio (saber se os
 // números já são representativos ou a fila ainda está processando).
 // ==========================================================================
-router.get("/dashboard/buscas-sem-resultado", exigirAdmin, (req, res) => {
+router.get("/dashboard/buscas-sem-resultado", exigirNivel('ver'), (req, res) => {
     const porCategoria = db.prepare(`
         SELECT categoria, COUNT(*) AS total
         FROM buscas_sem_resultado
@@ -1533,7 +1708,7 @@ router.get("/dashboard/buscas-sem-resultado", exigirAdmin, (req, res) => {
 // categoriasObservadas/categoriasInferidas ficam disponíveis pro tooltip
 // do gráfico dar o detalhe completo sem precisar de outra chamada.
 // ==========================================================================
-router.get("/dashboard/demanda-nao-atendida", exigirAdmin, (req, res) => {
+router.get("/dashboard/demanda-nao-atendida", exigirNivel('ver'), (req, res) => {
     const buscas = db.prepare(`
         SELECT categoria, municipio, estado, COUNT(*) AS total
         FROM buscas_sem_resultado
@@ -1660,7 +1835,7 @@ router.get("/dashboard/demanda-nao-atendida", exigirAdmin, (req, res) => {
 //   tempo". Fica aqui (não em /dashboard/status) porque é acionável —
 //   alguém devia checar o job — status é só leitura passiva.
 // ==========================================================================
-router.get("/dashboard/alertas", exigirAdmin, (req, res) => {
+router.get("/dashboard/alertas", exigirNivel('ver'), (req, res) => {
     const agora = Date.now();
     const alertas = [];
 
@@ -1783,7 +1958,7 @@ router.get("/dashboard/alertas", exigirAdmin, (req, res) => {
 //   hora (mesmo número que already alimenta o alerta crítico, aqui só
 //   como leitura, sem o texto de alerta).
 // ==========================================================================
-router.get("/dashboard/status", exigirAdmin, (req, res) => {
+router.get("/dashboard/status", exigirNivel('ver'), (req, res) => {
     const agora = Date.now();
 
     // ---- processo ----
@@ -1992,7 +2167,7 @@ const ROTAS_DISTINTAS_SUSPEITAS = 15;
 // perdido de alguém testando URL errada manualmente.
 const ACESSOS_FORA_DO_ESCOPO_SUSPEITO = 3;
 
-router.get("/dashboard/seguranca/ips", exigirAdmin, async (req, res) => {
+router.get("/dashboard/seguranca/ips", exigirNivel('ver'), async (req, res) => {
     const minutos = lerMinutos(req);
     const limite = lerLimite(req, LIMITE_IPS_PADRAO, LIMITE_IPS_MAXIMO);
     const desde = Date.now() - minutos * 60 * 1000;
@@ -2143,7 +2318,7 @@ router.get("/dashboard/seguranca/ips", exigirAdmin, async (req, res) => {
 const LIMITE_ACESSOS_INDEVIDOS_PADRAO = 30;
 const LIMITE_ACESSOS_INDEVIDOS_MAXIMO = 100;
 
-router.get("/dashboard/acessos-indevidos", exigirAdmin, (req, res) => {
+router.get("/dashboard/acessos-indevidos", exigirNivel('ver'), (req, res) => {
     const minutos = lerMinutos(req);
     const limite = lerLimite(req, LIMITE_ACESSOS_INDEVIDOS_PADRAO, LIMITE_ACESSOS_INDEVIDOS_MAXIMO);
     const desde = Date.now() - minutos * 60 * 1000;
@@ -2230,17 +2405,16 @@ function normalizarDiasSemanaModeracao(diasSemana) {
 
 // ==========================================================================
 // AUDITORIA — ver utils/auditoria.js pro raciocínio completo (por que a
-// mesma tabela cobre moderação E ações do próprio usuário, por que
-// "moderador" aqui é só um nome digitado e não um usuário de verdade).
+// mesma tabela cobre moderação E ações do próprio usuário).
 //
-// nomeModerador: lê o header X-Admin-Nome (mandado pelo front — ver
-// #admin-nome/chamarApi em moderacao/script.js). Não autentica nada (só
-// o ADMIN_TOKEN de exigirAdmin faz isso); é só o rótulo que vai pro log.
-// Sem o header (ex: chamada feita fora do front, curl direto), cai pra
-// "desconhecido" — nunca bloqueia a ação em si por falta de nome.
+// nomeModerador: agora vem do LOGIN autenticado (req.admin, ver
+// middleware/identidadeAdmin.js), não mais de um nome digitado à mão no
+// header X-Admin-Nome. Isso resolve o furo óbvio do formato anterior:
+// antes qualquer um com o ADMIN_TOKEN podia se identificar como quem
+// quisesse no log, o que pra fim jurídico não vale muita coisa. Agora o
+// rótulo é a conta que efetivamente autenticou.
 function nomeModerador(req) {
-    const bruto = sanitizarTextoModeracao(req.header("X-Admin-Nome"), 60);
-    return bruto || "desconhecido";
+    return req.admin ? `${req.admin.nome} <${req.admin.email}>` : "desconhecido";
 }
 
 // GET /api/admin/moderacao/prestadores?busca=&limit=
@@ -2248,7 +2422,7 @@ function nomeModerador(req) {
 // é dono, pra tela de moderação. ?busca= casa contra nome do prestador
 // (herdado da conta — ver formatarPrestador.js), categoria, ou nome/email
 // do dono; sem acento/maiúscula, mesmo padrão do resto do painel.
-router.get("/moderacao/prestadores", exigirAdmin, (req, res) => {
+router.get("/moderacao/prestadores", exigirNivel('full'), (req, res) => {
     const limite = lerLimite(req, 200, 2000);
     const busca = sanitizarTextoModeracao(req.query.busca, 100);
 
@@ -2283,7 +2457,7 @@ router.get("/moderacao/prestadores", exigirAdmin, (req, res) => {
 });
 
 // GET /api/admin/moderacao/prestadores/:id
-router.get("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
+router.get("/moderacao/prestadores/:id", exigirNivel('full'), (req, res) => {
     const linha = db.prepare(`
         SELECT
             p.*, u.nome AS donoNome, u.email AS donoEmail
@@ -2306,7 +2480,7 @@ router.get("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
 // Mesmos campos aceitos pelo PATCH do dono (ver routes/prestadores.js),
 // mas sem exigirDono — admin edita qualquer prestador. Campo omitido
 // preserva o valor atual (mesma regra de sempre neste projeto).
-router.patch("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
+router.patch("/moderacao/prestadores/:id", exigirNivel('full'), (req, res) => {
     const atual = db.prepare("SELECT * FROM prestadores WHERE id = ?").get(req.params.id);
     if (!atual) return res.status(404).json({ erro: "Prestador não encontrado." });
 
@@ -2373,7 +2547,7 @@ router.patch("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
 });
 
 // DELETE /api/admin/moderacao/prestadores/:id — sem checagem de dono.
-router.delete("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
+router.delete("/moderacao/prestadores/:id", exigirNivel('full'), (req, res) => {
     const linha = db.prepare("SELECT * FROM prestadores WHERE id = ?").get(req.params.id);
     if (!linha) return res.status(404).json({ erro: "Prestador não encontrado." });
 
@@ -2390,7 +2564,7 @@ router.delete("/moderacao/prestadores/:id", exigirAdmin, (req, res) => {
 // (nome/telefone/cpfCnpj, ver routes/usuarios.js) mais email, que o dono
 // nunca pode editar sozinho (é herdado do Google no login). Checagem de
 // unicidade de email replicada aqui porque a coluna é UNIQUE no schema.
-router.patch("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
+router.patch("/moderacao/usuarios/:id", exigirNivel('full'), (req, res) => {
     const atual = db.prepare("SELECT nome, email, telefone, cpf_cnpj FROM usuarios WHERE id = ?").get(req.params.id);
     if (!atual) return res.status(404).json({ erro: "Usuário não encontrado." });
 
@@ -2454,7 +2628,7 @@ router.patch("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
 // que sem exigir que seja a própria conta — ver comentário lá pra
 // detalhe de cada passo (ordem de FK, auditoria_contas, limpeza de
 // arquivo fora da transação).
-router.delete("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
+router.delete("/moderacao/usuarios/:id", exigirNivel('full'), (req, res) => {
     const usuario = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(req.params.id);
     if (!usuario) return res.status(404).json({ erro: "Conta não encontrada." });
 
@@ -2506,7 +2680,7 @@ router.delete("/moderacao/usuarios/:id", exigirAdmin, (req, res) => {
 // dentro do modal de edição (ver carregarHistoricoEntidade em
 // moderacao/script.js). Sem paginação de servidor de verdade — mesmo
 // padrão de limit simples já usado no resto do painel.
-router.get("/moderacao/log", exigirAdmin, (req, res) => {
+router.get("/moderacao/log", exigirNivel('full'), (req, res) => {
     const limite = lerLimite(req, 100, 500);
     const entidadeTipo = req.query.entidadeTipo === "usuario" || req.query.entidadeTipo === "prestador"
         ? req.query.entidadeTipo

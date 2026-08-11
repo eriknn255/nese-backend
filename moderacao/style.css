@@ -709,3 +709,104 @@ a.sidebar-theme-btn { text-decoration: none; }
 .log-celula-alteracoes details[open] summary {
     margin-bottom: 6px;
   }
+
+/* ==========================================================================
+   LOGIN INTERNO — overlay que cobre a tela inteira até a sessão ser
+   validada (ver initSessao em script.js). O .app-shell fica [hidden] até
+   lá, então nada do painel pisca antes da autenticação.
+   ========================================================================== */
+
+.login-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    padding: 20px;
+  }
+
+.login-overlay[hidden] { display: none; }
+
+.login-card {
+    width: 100%;
+    max-width: 340px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px 24px;
+  }
+
+.login-card h1 {
+    font-size: 18px;
+    margin: 4px 0 0;
+  }
+
+.login-nota {
+    color: var(--muted);
+    font-size: 12px;
+    margin: 0 0 12px;
+  }
+
+.login-card label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+.login-card input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    font-size: 14px;
+    padding: 9px 11px;
+    border-radius: 6px;
+    width: 100%;
+  }
+
+.login-card input:focus {
+    outline: none;
+    border-color: var(--gold);
+  }
+
+.login-card button {
+    margin-top: 14px;
+    background: var(--gold);
+    color: var(--bg);
+    border: none;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 11px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+.login-card button:disabled { opacity: 0.6; }
+
+.login-erro {
+    background: rgba(217, 100, 90, 0.1);
+    border: 1px solid rgba(217, 100, 90, 0.3);
+    color: var(--red);
+    font-size: 12px;
+    padding: 9px 11px;
+    border-radius: 6px;
+    margin-top: 12px;
+  }
+
+.login-erro[hidden] { display: none; }
+
+/* Quem está logado, no rodapé da sidebar (nome · nível). */
+.admin-identidade {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    padding: 6px 10px;
+    word-break: break-word;
+  }

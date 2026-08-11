@@ -11,17 +11,34 @@
 <body>
 
 <!-- ==========================================================================
-     MODERAÇÃO — página separada do dashboard de métricas (index.html), que
-     é só leitura. Aqui é edição/exclusão IRRESTRITA de usuários e
-     prestadores (ver PATCH/DELETE /api/admin/moderacao/* em admin.js) —
-     mesmo ADMIN_TOKEN do dashboard, reaproveitado do mesmo localStorage
-     (ver TOKEN_KEY em moderacao.js, tem que bater com o de script.js).
-     Base: listar + editar campos + excluir, em usuários e prestadores,
-     com log de auditoria de quem mudou o quê (ver aba "Log de auditoria"
-     e GET /api/admin/moderacao/log em admin.js). Sem paginação de
-     servidor além do limit simples de sempre.
+     MODERAÇÃO — página separada do dashboard de métricas, com CSS próprio
+     (style.css desta pasta). Aqui é edição/exclusão IRRESTRITA de usuários
+     e prestadores (ver PATCH/DELETE /api/admin/moderacao/* em admin.js),
+     com log de auditoria de quem mudou o quê.
+
+     ACESSO: exige login interno de nível 'full'. A sessão (JWT) é
+     compartilhada com o dashboard via localStorage — ver SESSAO_KEY em
+     script.js. Sem sessão válida, só o overlay de login abaixo aparece.
      ========================================================================== -->
-<div class="app-shell">
+
+<div class="login-overlay" id="login-overlay" hidden>
+  <form class="login-card" id="form-login">
+    <img src="/dashboard/img/logo-nese.webp" alt="Nese" width="40" height="40">
+    <h1>Moderação</h1>
+    <p class="login-nota">Acesso restrito — requer login de nível "full".</p>
+
+    <label for="login-email">E-mail</label>
+    <input type="email" id="login-email" autocomplete="username" required>
+
+    <label for="login-senha">Senha</label>
+    <input type="password" id="login-senha" autocomplete="current-password" required>
+
+    <div class="login-erro" id="login-erro" hidden></div>
+    <button type="submit" id="login-btn">Entrar</button>
+  </form>
+</div>
+
+<div class="app-shell" id="app-shell" hidden>
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-logo-row">
       <span class="sidebar-title-full">Moderação</span>
@@ -39,6 +56,10 @@
     </button>
 
     <div class="sidebar-spacer"></div>
+    <div class="admin-identidade" id="admin-identidade"></div>
+    <button id="logout-btn" type="button" class="sidebar-theme-btn" title="Sair">
+      <span>🚪</span><span class="sidebar-link-label">Sair</span>
+    </button>
     <a href="/dashboard/" id="dashboard-link-btn" class="sidebar-theme-btn" title="Voltar pro dashboard">
       <span>📊</span><span class="sidebar-link-label">Dashboard</span>
     </a>
@@ -57,17 +78,6 @@
     </header>
 
     <div class="error-banner" id="error-banner"></div>
-
-    <div class="token-row" id="token-row">
-      <label for="admin-token">Token de admin</label>
-      <input type="password" id="admin-token" placeholder="X-Admin-Token" autocomplete="off">
-      <label class="remember-label">
-        <input type="checkbox" id="remember-token"> Lembrar neste navegador
-      </label>
-      <label for="admin-nome">Seu nome</label>
-      <input type="text" id="admin-nome" placeholder="Pra identificar você no log de auditoria" autocomplete="off" style="min-width:180px;">
-      <button id="token-save-btn" type="button">Salvar</button>
-    </div>
 
     <!-- ==================== ABA: USUÁRIOS ==================== -->
     <section class="aba-conteudo" id="aba-usuarios">

@@ -257,4 +257,26 @@ if (!colunasLogAuditoria.some(c => c.name === "origem")) {
     console.log("[db] migração aplicada: log_auditoria_moderacao.origem");
 }
 
+// ==========================================================================
+// admins — logins internos do dashboard/moderação (ver
+// middleware/identidadeAdmin.js pro raciocínio completo). nivel: 'ver'
+// (só dashboard, só leitura) ou 'full' (dashboard + moderação). Criado
+// SÓ via POST /api/admin/contas, protegido pelo ADMIN_TOKEN estático —
+// ninguém cria login novo sem esse segredo, nem um 'full' já logado.
+//
+// senha_hash: "salt:hash" via scrypt (ver utils/senha.js) — nunca senha
+// em texto puro, nunca bcrypt como dependência nova só pra isso.
+// ==========================================================================
+db.exec(`
+    CREATE TABLE IF NOT EXISTS admins (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        nome TEXT NOT NULL,
+        senha_hash TEXT NOT NULL,
+        nivel TEXT NOT NULL CHECK (nivel IN ('ver', 'full')),
+        criado_em INTEGER NOT NULL,
+        criado_por TEXT
+    )
+`);
+
 module.exports = db;

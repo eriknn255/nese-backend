@@ -61,45 +61,118 @@ function resolverAvatarUrl(avatarEfetivo) {
 //   stats: { ativosHoje, ativacoesMes, onlineAgora, totalServicos, errosHoje }
 // }
 
-const TOKEN_KEY = 'mase-admin-token';
+// ==========================================================================
+// SESSÃO (login interno) — substitui o antigo campo "cole o ADMIN_TOKEN
+// aqui". O ADMIN_TOKEN do .env agora só cria login (POST /admin/contas);
+// o que autentica no dia a dia é este JWT (ver
+// middleware/identidadeAdmin.js).
+//
+// Vai no MESMO header X-Admin-Token que o token estático usava, de
+// propósito: assim as dezenas de fetch() deste arquivo continuam iguais,
+// só a ORIGEM do valor mudou. SESSAO_KEY tem que bater com o de
+// moderacao/script.js — é o que faz "logar uma vez valer nos dois".
+// ==========================================================================
+const SESSAO_KEY = 'nese-admin-sessao';
+const ENDPOINT_LOGIN = 'https://nese-be.ruexinternet.com/api/admin/login';
+const ENDPOINT_EU = 'https://nese-be.ruexinternet.com/api/admin/eu';
+
+let adminAtual = null; // { id, email, nome, nivel }
 
 function getToken() {
-  const campo = document.getElementById('admin-token').value.trim();
-  if (campo) return campo;
   try {
-    return localStorage.getItem(TOKEN_KEY) || '';
+    return localStorage.getItem(SESSAO_KEY) || '';
   } catch (e) {
     return '';
   }
 }
 
-function initTokenField() {
-  let saved = '';
+function encerrarSessao() {
   try {
-    saved = localStorage.getItem(TOKEN_KEY) || '';
+    localStorage.removeItem(SESSAO_KEY);
   } catch (e) {
-    // localStorage indisponível nesta sessão (ex: preview sandboxed) — segue sem preencher
+    // sem persistência nesta sessão
   }
-  if (saved) {
-    document.getElementById('admin-token').value = saved;
-    document.getElementById('remember-token').checked = true;
+  adminAtual = null;
+  mostrarLogin();
+}
+
+function mostrarLogin(mensagem) {
+  document.getElementById('login-overlay').hidden = false;
+  document.getElementById('app-shell').hidden = true;
+  const erro = document.getElementById('login-erro');
+  if (mensagem) {
+    erro.textContent = mensagem;
+    erro.hidden = false;
+  } else {
+    erro.hidden = true;
   }
 }
 
-document.getElementById('token-save-btn').addEventListener('click', () => {
-  const lembrar = document.getElementById('remember-token').checked;
-  const valor = document.getElementById('admin-token').value.trim();
+function mostrarApp() {
+  document.getElementById('login-overlay').hidden = true;
+  document.getElementById('app-shell').hidden = false;
+  document.getElementById('admin-identidade').textContent = `${adminAtual.nome} · ${adminAtual.nivel}`;
+
+  // Nível 'ver' não acessa moderação (o backend responde 403 em tudo lá).
+  // Esconder o link é só cortesia de UI — quem manda é o servidor.
+  const linkModeracao = document.getElementById('moderacao-link-btn');
+  if (linkModeracao) linkModeracao.hidden = adminAtual.nivel !== 'full';
+}
+
+document.getElementById('form-login').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const botao = document.getElementById('login-btn');
+  botao.disabled = true;
+  botao.textContent = 'Entrando…';
+
   try {
-    if (lembrar && valor) {
-      localStorage.setItem(TOKEN_KEY, valor);
-    } else {
-      localStorage.removeItem(TOKEN_KEY);
+    const res = await fetch(ENDPOINT_LOGIN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: document.getElementById('login-email').value.trim(),
+        senha: document.getElementById('login-senha').value
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.erro || `Falha no login (HTTP ${res.status}).`);
+
+    try {
+      localStorage.setItem(SESSAO_KEY, data.token);
+    } catch (e) {
+      // segue valendo só até recarregar a página
     }
+    adminAtual = data.admin;
+    mostrarApp();
+    load();
   } catch (e) {
-    // sem persistência disponível nesta sessão — token continua valendo só até recarregar a página
+    mostrarLogin(e.message);
+  } finally {
+    botao.disabled = false;
+    botao.textContent = 'Entrar';
   }
-  load();
 });
+
+document.getElementById('logout-btn').addEventListener('click', encerrarSessao);
+
+// Revalida a sessão guardada no boot: o JWT expira em 12h e o login pode
+// ter sido revogado (DELETE /admin/contas/:id) desde a última visita.
+async function initSessao() {
+  const token = getToken();
+  if (!token) return mostrarLogin();
+
+  try {
+    const res = await fetch(ENDPOINT_EU, { headers: { 'X-Admin-Token': token } });
+    if (!res.ok) return mostrarLogin(res.status === 401 ? 'Sessão expirada. Entre de novo.' : null);
+
+    const data = await res.json();
+    adminAtual = data.admin;
+    mostrarApp();
+    load();
+  } catch (e) {
+    mostrarLogin('Não foi possível falar com o servidor.');
+  }
+}
 
 function render(data) {
   document.getElementById('stat-online-agora').textContent = data.stats.onlineAgora;
@@ -2299,7 +2372,7 @@ document.querySelectorAll('.sidebar-link[data-aba]').forEach(btn => {
 // Persistido em localStorage igual o tema — reabrir o painel deve manter
 // a preferência de "menu retraído" da última visita, na mesma sessão de
 // navegador (mesma ressalva de previews sandboxed já documentada em
-// initTheme/initTokenField).
+// initTheme/initSessao).
 const SIDEBAR_KEY = 'mase-sidebar-retraida';
 
 function aplicarSidebarRetraida(retraida) {
@@ -2522,6 +2595,5 @@ function initAutoRefresh() {
 }
 
 initTheme();
-initTokenField();
-load();
+initSessao(); // decide sozinho entre mostrar login ou carregar o painel
 initAutoRefresh();

@@ -1,10 +1,15 @@
 // ==========================================================================
 // MODERAÇÃO — CRUD irrestrito de usuários/prestadores (ver rotas
 // /api/admin/moderacao/* em admin.js). Página separada do dashboard de
-// métricas (index.html/script.js, que é só leitura) — reaproveita o
-// MESMO style.css e o MESMO token (TOKEN_KEY abaixo tem que bater
-// exatamente com o de script.js, é assim que "logar uma vez, usar nos
-// dois" funciona: os dois lêem/escrevem a mesma chave do localStorage).
+// métricas, com CSS próprio (style.css desta pasta).
+//
+// ACESSO: exige login interno de nível 'full' (ver
+// middleware/identidadeAdmin.js). A sessão é o JWT devolvido por
+// POST /api/admin/login, guardado em SESSAO_KEY — MESMA chave que o
+// dashboard usa, é assim que "logar uma vez vale nos dois painéis"
+// funciona. Quem é nível 'ver' consegue logar aqui, mas o backend
+// responde 403 em tudo; a tela avisa e manda de volta pro dashboard em
+// vez de mostrar tabela vazia sem explicação.
 // ==========================================================================
 
 const BASE_API = 'https://nese-be.ruexinternet.com/api/admin';
@@ -24,78 +29,123 @@ function resolverAvatarUrl(avatarEfetivo) {
   return BACKEND_ORIGIN + avatarEfetivo;
 }
 
-// ---- Token de admin (MESMA chave que script.js — compartilhado entre as duas páginas) ----
-const TOKEN_KEY = 'mase-admin-token';
+// ==========================================================================
+// SESSÃO (login interno) — substitui o antigo campo "cole o ADMIN_TOKEN
+// aqui". O ADMIN_TOKEN do .env agora só cria login (POST /admin/contas);
+// o que autentica no dia a dia é este JWT.
+// ==========================================================================
+const SESSAO_KEY = 'nese-admin-sessao';
+const ENDPOINT_LOGIN = `${BASE_API}/login`;
+const ENDPOINT_EU = `${BASE_API}/eu`;
+
+let adminAtual = null; // { id, email, nome, nivel } depois do login
 
 function getToken() {
-  const campo = document.getElementById('admin-token').value.trim();
-  if (campo) return campo;
   try {
-    return localStorage.getItem(TOKEN_KEY) || '';
+    return localStorage.getItem(SESSAO_KEY) || '';
   } catch (e) {
     return '';
   }
 }
 
-// ---- Nome do moderador (identifica quem mexeu, pro log de auditoria —
-// ver nomeModerador em admin.js). Mesmo padrão de persistência do token,
-// chave própria: não precisa do "lembrar neste navegador" do token porque
-// não é segredo nenhum, só um rótulo. ----
-const NOME_KEY = 'mase-admin-nome';
-
-function getNomeModerador() {
-  const campo = document.getElementById('admin-nome').value.trim();
-  if (campo) return campo;
+function salvarSessao(token) {
   try {
-    return localStorage.getItem(NOME_KEY) || '';
+    localStorage.setItem(SESSAO_KEY, token);
   } catch (e) {
-    return '';
+    // sem persistência nesta sessão — segue valendo só até recarregar
   }
 }
 
-function initNomeField() {
-  let saved = '';
+function encerrarSessao() {
   try {
-    saved = localStorage.getItem(NOME_KEY) || '';
+    localStorage.removeItem(SESSAO_KEY);
   } catch (e) {
-    // localStorage indisponível nesta sessão — segue sem preencher
+    // idem
   }
-  if (saved) document.getElementById('admin-nome').value = saved;
+  adminAtual = null;
+  mostrarLogin();
 }
 
-function initTokenField() {
-  let saved = '';
-  try {
-    saved = localStorage.getItem(TOKEN_KEY) || '';
-  } catch (e) {
-    // localStorage indisponível nesta sessão — segue sem preencher
-  }
-  if (saved) {
-    document.getElementById('admin-token').value = saved;
-    document.getElementById('remember-token').checked = true;
+function mostrarLogin(mensagem) {
+  document.getElementById('login-overlay').hidden = false;
+  document.getElementById('app-shell').hidden = true;
+  const erro = document.getElementById('login-erro');
+  if (mensagem) {
+    erro.textContent = mensagem;
+    erro.hidden = false;
+  } else {
+    erro.hidden = true;
   }
 }
 
-document.getElementById('token-save-btn').addEventListener('click', () => {
-  const lembrar = document.getElementById('remember-token').checked;
-  const valor = document.getElementById('admin-token').value.trim();
-  const nome = document.getElementById('admin-nome').value.trim();
+function mostrarApp() {
+  document.getElementById('login-overlay').hidden = true;
+  document.getElementById('app-shell').hidden = false;
+  document.getElementById('admin-identidade').textContent = `${adminAtual.nome} · ${adminAtual.nivel}`;
+}
+
+document.getElementById('form-login').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const botao = document.getElementById('login-btn');
+  botao.disabled = true;
+  botao.textContent = 'Entrando…';
+
   try {
-    if (lembrar && valor) {
-      localStorage.setItem(TOKEN_KEY, valor);
-    } else {
-      localStorage.removeItem(TOKEN_KEY);
+    const res = await fetch(ENDPOINT_LOGIN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: document.getElementById('login-email').value.trim(),
+        senha: document.getElementById('login-senha').value
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.erro || `Falha no login (HTTP ${res.status}).`);
+
+    salvarSessao(data.token);
+    adminAtual = data.admin;
+
+    // 'ver' não tem nada pra fazer aqui — o backend responde 403 em toda
+    // rota desta tela. Melhor dizer isso na cara do que deixar a pessoa
+    // olhando tabelas vazias achando que quebrou.
+    if (adminAtual.nivel !== 'full') {
+      mostrarLogin('Seu login é de nível "ver", que só acessa a dashboard. Peça um login "full" pra usar a moderação.');
+      return;
     }
-    if (nome) {
-      localStorage.setItem(NOME_KEY, nome);
-    } else {
-      localStorage.removeItem(NOME_KEY);
-    }
+
+    mostrarApp();
+    carregarAbaAtiva();
   } catch (e) {
-    // sem persistência disponível nesta sessão
+    mostrarLogin(e.message);
+  } finally {
+    botao.disabled = false;
+    botao.textContent = 'Entrar';
   }
-  carregarAbaAtiva();
 });
+
+document.getElementById('logout-btn').addEventListener('click', encerrarSessao);
+
+// Revalida a sessão guardada no boot: JWT pode ter expirado (12h) ou o
+// login pode ter sido revogado (DELETE /contas/:id) desde a última visita.
+async function initSessao() {
+  const token = getToken();
+  if (!token) return mostrarLogin();
+
+  try {
+    const res = await fetch(ENDPOINT_EU, { headers: { 'X-Admin-Token': token } });
+    if (!res.ok) return mostrarLogin(res.status === 401 ? 'Sessão expirada. Entre de novo.' : null);
+
+    const data = await res.json();
+    adminAtual = data.admin;
+    if (adminAtual.nivel !== 'full') {
+      return mostrarLogin('Seu login é de nível "ver", que só acessa a dashboard.');
+    }
+    mostrarApp();
+    carregarAbaAtiva();
+  } catch (e) {
+    mostrarLogin('Não foi possível falar com o servidor.');
+  }
+}
 
 // ---- Utilidades (mesmo padrão de script.js) ----
 
@@ -138,16 +188,21 @@ async function chamarApi(url, opcoes = {}) {
   if (!token) {
     throw new Error('Preencha o token de admin acima pra carregar.');
   }
-  const nomeModerador = getNomeModerador();
   const res = await fetch(url, {
     ...opcoes,
     headers: {
       'X-Admin-Token': token,
-      ...(nomeModerador ? { 'X-Admin-Nome': nomeModerador } : {}),
       ...(opcoes.body ? { 'Content-Type': 'application/json' } : {}),
       ...(opcoes.headers || {})
     }
   });
+
+  // Sessão expirada (12h) ou login revogado enquanto a aba estava aberta:
+  // volta pra tela de login em vez de deixar erro genérico na tela.
+  if (res.status === 401) {
+    encerrarSessao();
+    throw new Error('Sessão expirada. Entre de novo.');
+  }
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -802,6 +857,4 @@ document.getElementById('theme-btn').addEventListener('click', () => {
 // ==========================================================================
 
 initTheme();
-initTokenField();
-initNomeField();
-carregarAbaAtiva();
+initSessao(); // decide sozinho entre mostrar login ou carregar a tela

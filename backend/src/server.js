@@ -6,6 +6,7 @@ const cors = require("cors");
 const db = require("./db"); // aplica schema + semeia demo antes de tudo
 
 const { identificarUsuario, registrarPresenca } = require("./middleware/identidade");
+const { identificarAdmin } = require("./middleware/identidadeAdmin");
 const rotasUsuarios = require("./routes/usuarios");
 const rotasPrestadores = require("./routes/prestadores");
 const rotasAvaliacoes = require("./routes/avaliacoes");
@@ -51,6 +52,7 @@ app.use(cors(origensPermitidas ? {
 } : undefined));
 app.use(express.json());
 app.use(identificarUsuario); // anexa req.usuario (ou null) em toda request
+app.use(identificarAdmin);   // idem pra req.admin — ver middleware/identidadeAdmin.js
 app.use(registrarPresenca);  // grava last_seen_at (throttled) — ver middleware/identidade.js
 
 // ==========================================================================

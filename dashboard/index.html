@@ -21,7 +21,28 @@
 <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 </head>
 <body>
-<div class="app-shell" id="app-shell">
+
+<!-- Login interno — o painel inteiro fica [hidden] até initSessao()
+     validar a sessão (ver script.js). Nível 'ver' entra aqui normalmente;
+     quem é 'ver' só não enxerga o link da moderação. -->
+<div class="login-overlay" id="login-overlay" hidden>
+  <form class="login-card" id="form-login">
+    <img src="img/logo-nese.webp" alt="Nese" width="40" height="40">
+    <h1>Dashboard</h1>
+    <p class="login-nota">Acesso restrito.</p>
+
+    <label for="login-email">E-mail</label>
+    <input type="email" id="login-email" autocomplete="username" required>
+
+    <label for="login-senha">Senha</label>
+    <input type="password" id="login-senha" autocomplete="current-password" required>
+
+    <div class="login-erro" id="login-erro" hidden></div>
+    <button type="submit" id="login-btn">Entrar</button>
+  </form>
+</div>
+
+<div class="app-shell" id="app-shell" hidden>
 
   <!-- ==========================================================================
        SIDEBAR — navegação entre abas. Cada botão ativa uma aba (data-aba)
@@ -81,7 +102,11 @@
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Avaliações</span>
     </button>
     <div class="sidebar-spacer"></div>
-    <a href="/moderacao/" id="moderacao-link-btn" class="sidebar-theme-btn" title="Abrir página de administração e moderação">
+    <div class="admin-identidade" id="admin-identidade"></div>
+    <button id="logout-btn" type="button" class="sidebar-theme-btn" title="Sair">
+      <span>🚪</span><span class="sidebar-link-label">Sair</span>
+    </button>
+    <a href="/moderacao/" id="moderacao-link-btn" class="sidebar-theme-btn" title="Abrir página de administração e moderação" hidden>
       <span>🛡️</span><span class="sidebar-link-label">Moderação</span>
     </a>
     <button id="theme-btn" type="button" class="sidebar-theme-btn" aria-label="Alternar tema claro/escuro" title="Alternar tema">
@@ -112,15 +137,6 @@
     </header>
 
     <div class="error-banner" id="error-banner"></div>
-
-    <div class="token-row" id="token-row">
-      <label for="admin-token">Token de admin</label>
-      <input type="password" id="admin-token" placeholder="X-Admin-Token" autocomplete="off">
-      <label class="remember-label">
-        <input type="checkbox" id="remember-token"> Lembrar neste navegador
-      </label>
-      <button id="token-save-btn" type="button">Salvar</button>
-    </div>
 
     <!-- ==================== ABA: VISÃO GERAL ==================== -->
     <section class="aba-conteudo" id="aba-visao-geral">
