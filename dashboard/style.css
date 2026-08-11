@@ -347,11 +347,64 @@
     border-radius: 6px;
   }
 
-  /* Única tabela da aba "Requests" agora (ver index.html) — sem uma
-     segunda seção dividindo o espaço abaixo, dá pra abrir mais altura
-     antes de precisar rolar. */
-  .requests-panel-unico {
-    max-height: 640px;
+  /* ==========================================================================
+     Aba "Requests": a tabela é o ÚNICO conteúdo da aba e nada é projetado
+     pra vir abaixo dela, então ela ocupa toda a altura disponível em vez
+     de parar num teto fixo (era max-height: 640px, que deixava faixa morta
+     embaixo em tela grande e continuava apertada em tela baixa).
+
+     Como funciona: a <section> vira uma coluna flex com altura amarrada à
+     viewport, e o painel da tabela é o único filho que estica (flex: 1).
+     Título, toolbar e o botão "Carregar mais" mantêm a altura natural —
+     o botão continua ancorado no rodapé, sempre visível, sem depender de
+     rolar a lista até o fim.
+
+     O 108px do calc não é chute: é exatamente o padding vertical de
+     .main-area (28px em cima + 80px embaixo). Se aquele padding mudar,
+     este número tem que mudar junto.
+
+     100dvh (não 100vh) pelo mesmo motivo já documentado na .sidebar: em
+     navegador com barra de endereço dinâmica, 100vh estoura a área
+     visível real e o rodapé fica inalcançável.
+
+     :not([hidden]) é obrigatório — a regra .aba-conteudo[hidden] que
+     esconde as abas inativas tem especificidade menor que um seletor de
+     id, então um "#aba-requests { display: flex }" cru venceria ela e a
+     aba apareceria mesmo fechada.
+
+     min-height segura o caso da tela muito baixa: abaixo disso a lista
+     para de encolher e a página rola normal, em vez de virar uma fresta.
+     ========================================================================== */
+  #aba-requests:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 108px);
+    min-height: 420px;
+  }
+
+  /* min-height: 0 é o que permite o filho flex encolher abaixo do próprio
+     conteúdo e, com isso, o overflow-y do painel entrar em ação. Sem ele
+     a tabela empurraria a section pra fora da tela em vez de rolar por
+     dentro (mesma armadilha já anotada na .sidebar). */
+  #aba-requests .requests-panel-unico {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+  }
+
+  /* Mobile: a sidebar deixa de ser coluna lateral e passa a ocupar o topo
+     do fluxo, então .main-area não começa mais no topo da viewport e o
+     calc acima passaria a medir errado (sobraria altura, cortando o
+     rodapé). Volta pro comportamento de altura natural com teto. */
+  @media (max-width: 720px) {
+    #aba-requests:not([hidden]) {
+      height: auto;
+      min-height: 0;
+    }
+    #aba-requests .requests-panel-unico {
+      flex: none;
+      max-height: 70vh;
+    }
   }
 
   .requests-panel table {
