@@ -324,14 +324,15 @@
          tudo num lugar só, do mais específico (linha por IP) ao mais
          panorâmico (região). -->
     <section class="aba-conteudo" id="aba-seguranca" hidden>
-      <!-- Seletor de janela no cabeçalho da SEÇÃO, não numa linha só dele:
-           ele governa a aba inteira ("Requests por IP" E "Requests
-           suspeitos" leem a mesma janela — ver obterJanelaSeguranca em
-           script.js), então mora no título que nomeia esse conjunto. Se
-           descesse pro cabeçalho de "Requests por IP", passaria a
-           parecer que só filtra aquela tabela. -->
+      <div class="section-title">Segurança</div>
+
+      <!-- Seletor de janela no cabeçalho desta seção, na extremidade
+           oposta ao título. OBS pra manutenção: a janela escolhida aqui
+           vale pra ABA INTEIRA — "Requests suspeitos" e "Concentração
+           por região" leem o mesmo valor (ver obterJanelaSeguranca em
+           script.js), não só esta tabela. -->
       <div class="section-header">
-        <div class="section-title">Segurança <span class="section-note">(janela vale para todas as tabelas desta aba)</span></div>
+        <div class="section-title">Requests por IP <span class="section-note">(volume e densidade de requests por IP)</span></div>
         <div class="section-header-controles">
           <label for="seguranca-janela" class="table-toolbar-label">Janela</label>
           <select id="seguranca-janela">
@@ -343,8 +344,6 @@
           <span class="search-count" id="seguranca-resumo"></span>
         </div>
       </div>
-
-      <div class="section-title">Requests por IP <span class="section-note">(volume e densidade de requests por IP)</span></div>
       <div class="requests-panel">
         <table>
           <thead>
@@ -494,27 +493,45 @@
 
     <!-- ==================== ABA: GRÁFICOS TÉCNICOS ==================== -->
     <section class="aba-conteudo" id="aba-graficos-tecnico" hidden>
-      <div class="section-title">Requests por hora <span class="section-note">(últimas 24h)</span></div>
+      <!-- Janela única pra aba inteira: os gráficos e as duas tabelas
+           abaixo leem o mesmo valor (ver janelaTecnicos em script.js).
+           "Tudo" aqui NÃO é "desde a criação do app" — request_logs tem
+           TTL (LOG_RETENCAO_DIAS, 90 dias por padrão), então o histórico
+           técnico só existe até onde o job de limpeza ainda não chegou.
+           O rótulo dinâmico ao lado de cada título deixa isso explícito. -->
+      <div class="section-header">
+        <div class="section-title">Gráficos técnicos</div>
+        <div class="section-header-controles">
+          <div class="periodo-seletor" id="tecnicos-periodo-seletor" role="group" aria-label="Janela dos gráficos técnicos">
+            <button type="button" data-horas="24" class="active">24h</button>
+            <button type="button" data-horas="168">7d</button>
+            <button type="button" data-horas="720">30d</button>
+            <button type="button" data-horas="tudo">Tudo</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title">Volume de requests <span class="section-note janela-tecnicos-rotulo"></span></div>
       <div class="chart-card">
         <div class="area-chart" id="chart-requests-hora"><div class="empty-state">carregando…</div></div>
       </div>
 
-      <div class="section-title">Erros por hora <span class="section-note">(status ≥ 400, últimas 24h)</span></div>
+      <div class="section-title">Erros <span class="section-note">(status ≥ 400, exceto 401/403) <span class="janela-tecnicos-rotulo"></span></span></div>
       <div class="chart-card">
         <div class="area-chart" id="chart-erros-hora"><div class="empty-state">carregando…</div></div>
       </div>
 
-      <div class="section-title">Usuários ativos por hora <span class="section-note">(contas distintas com pelo menos 1 request autenticada na hora — aproximação de "online", não um histórico de presença real)</span></div>
+      <div class="section-title">Usuários ativos <span class="section-note">(contas distintas com pelo menos 1 request autenticada no período — aproximação de "online", não um histórico de presença real) <span class="janela-tecnicos-rotulo"></span></span></div>
       <div class="chart-card">
         <div class="area-chart" id="chart-usuarios-ativos-hora"><div class="empty-state">carregando…</div></div>
       </div>
 
-      <div class="section-title">Requests por status <span class="section-note">(últimas 24h, agrupado por classe HTTP)</span></div>
+      <div class="section-title">Requests por status <span class="section-note">(agrupado por classe HTTP) <span class="janela-tecnicos-rotulo"></span></span></div>
       <div class="chart-card">
         <div class="bar-chart" id="chart-requests-status"><div class="empty-state">carregando…</div></div>
       </div>
 
-      <div class="section-title">Rotas mais chamadas <span class="section-note">(top 25, últimas 24h — tráfego geral, com ou sem erro)</span></div>
+      <div class="section-title">Rotas mais chamadas <span class="section-note">(top 25 — tráfego geral, com ou sem erro) <span class="janela-tecnicos-rotulo"></span></span></div>
       <div class="requests-panel" id="rotas-populares-panel">
         <table>
           <thead>
@@ -531,7 +548,7 @@
         </table>
       </div>
 
-      <div class="section-title">Erros por rota <span class="section-note">(top 25, últimas 24h — quem quebra de verdade, não só "quantos 5xx" no total)</span></div>
+      <div class="section-title">Erros por rota <span class="section-note">(top 25 — quem quebra de verdade, não só "quantos 5xx" no total) <span class="janela-tecnicos-rotulo"></span></span></div>
       <div class="requests-panel" id="erros-por-rota-panel">
         <table>
           <thead>
@@ -577,6 +594,7 @@
           <button type="button" data-dias="7">7d</button>
           <button type="button" data-dias="14" class="active">14d</button>
           <button type="button" data-dias="30">30d</button>
+          <button type="button" data-dias="tudo">Tudo</button>
         </div>
       </div>
       <div class="chart-card">
