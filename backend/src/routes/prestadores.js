@@ -14,6 +14,7 @@ ffmpeg.setFfmpegPath(require("ffmpeg-static"));
 const db = require("../db");
 const { sanitizarTexto } = require("../utils/sanitizar");
 const { exigirUsuario } = require("../middleware/identidade");
+const { registrarAuditoria, diffCampos } = require("../utils/auditoria");
 const { formatarPrestador, SELECT_PRESTADORES_COM_NOTA } = require("../utils/formatarPrestador");
 const { validarTelefone } = require("../utils/telefone");
 
@@ -308,13 +309,17 @@ router.post("/", exigirUsuario, (req, res) => {
 // removerPrestadorCadastrado, mas checando posse de verdade em vez de
 // "este aparelho cadastrou").
 router.delete("/:id", exigirUsuario, (req, res) => {
-    const linha = db.prepare("SELECT dono_usuario_id FROM prestadores WHERE id = ?").get(req.params.id);
+    const linha = db.prepare("SELECT * FROM prestadores WHERE id = ?").get(req.params.id);
     if (!linha) return res.status(404).json({ erro: "Prestador não encontrado." });
     if (linha.dono_usuario_id !== req.usuario.id) {
         return res.status(403).json({ erro: "Só quem cadastrou pode remover." });
     }
 
     db.prepare("DELETE FROM prestadores WHERE id = ?").run(req.params.id);
+    registrarAuditoria({
+        ator: "O próprio usuário", origem: "usuario", acao: "excluir",
+        entidadeTipo: "prestador", entidadeId: req.params.id, alteracoes: linha
+    });
     res.status(204).end();
 });
 
@@ -376,6 +381,22 @@ router.patch("/:id", exigirUsuario, exigirDono, (req, res) => {
         dias_semana: JSON.stringify(diasSemana),
         tags: JSON.stringify(tags)
     });
+
+    const alteracoesPrestador = diffCampos(
+        {
+            categoria: atual.categoria, descricao: atual.descricao, telefone: atual.telefone,
+            lat: atual.lat, lng: atual.lng, horarioAbre: atual.horario_abre, horarioFecha: atual.horario_fecha,
+            diasSemana: atual.dias_semana ? JSON.parse(atual.dias_semana) : [0, 1, 2, 3, 4, 5, 6],
+            tags: JSON.parse(atual.tags || "[]")
+        },
+        { categoria, descricao, telefone, lat, lng, horarioAbre, horarioFecha, diasSemana, tags }
+    );
+    if (alteracoesPrestador) {
+        registrarAuditoria({
+            ator: "O próprio usuário", origem: "usuario", acao: "editar",
+            entidadeTipo: "prestador", entidadeId: req.params.id, alteracoes: alteracoesPrestador
+        });
+    }
 
     const linha = db.prepare(`${SELECT_PRESTADORES_COM_NOTA} WHERE p.id = ? GROUP BY p.id`).get(req.params.id);
     res.json(formatarPrestador(linha));
