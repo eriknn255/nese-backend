@@ -1708,39 +1708,6 @@ router.get("/dashboard/cobertura", exigirNivel('ver'), (req, res) => {
 });
 
 // ==========================================================================
-// GET /api/admin/dashboard/buscas-sem-resultado
-// Demanda REAL não atendida, agregada só por categoria (sem quebrar por
-// município) — alimenta o gráfico de barras "qual categoria tem mais
-// gente esbarrando em não achei ninguém", independente de onde. O
-// ranking categoria+município (que também vinha daqui) saiu — ver
-// /dashboard/demanda-nao-atendida, que combina isso com a lacuna inferida
-// de cobertura num ranking só, em vez de duas tabelas competindo.
-//
-// pendentesGeocoding: quantas linhas ainda não foram resolvidas pelo job
-// de background — mesmo propósito de prestadoresSemMunicipio (saber se os
-// números já são representativos ou a fila ainda está processando).
-// ==========================================================================
-router.get("/dashboard/buscas-sem-resultado", exigirNivel('ver'), (req, res) => {
-    const porCategoria = db.prepare(`
-        SELECT categoria, COUNT(*) AS total
-        FROM buscas_sem_resultado
-        GROUP BY categoria
-        ORDER BY total DESC
-        LIMIT 15
-    `).all();
-
-    const { total: totalGeral } = db.prepare(
-        "SELECT COUNT(*) AS total FROM buscas_sem_resultado"
-    ).get();
-
-    const { total: pendentesGeocoding } = db.prepare(
-        "SELECT COUNT(*) AS total FROM buscas_sem_resultado WHERE municipio IS NULL"
-    ).get();
-
-    res.json({ porCategoria, totalGeral, pendentesGeocoding });
-});
-
-// ==========================================================================
 // GET /api/admin/dashboard/demanda-nao-atendida
 // Substitui as duas tabelas categoria×município que competiam entre si
 // (categoriasSemOferta, que morava em /dashboard/cobertura, e
