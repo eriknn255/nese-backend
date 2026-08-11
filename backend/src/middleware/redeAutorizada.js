@@ -60,7 +60,11 @@ function carregarConfig() {
         // inteiro — degrada pra "criação de login fechada", que é o
         // mesmo lado seguro de não ter IP configurado.
         console.error("[bootstrap] falha ao ler config/acesso.json:", erro.message);
-        return {};
+        // Sinaliza a causa pra avaliarAcesso poder dizer "JSON inválido"
+        // em vez de "nenhum IP autorizado" — os dois fecham a rota, mas
+        // um é configuração vazia e o outro é erro de sintaxe. Confundir
+        // os dois manda quem está diagnosticando pro lugar errado.
+        return { _erroLeitura: erro.message };
     }
 }
 
@@ -180,6 +184,9 @@ async function paisAutorizado(ip) {
 async function avaliarAcesso(req) {
     const ip = normalizarIp(req.ip);
 
+    if (CONFIG._erroLeitura) {
+        return { permitido: false, motivo: `config/acesso.json inválido (${CONFIG._erroLeitura}) — corrija o arquivo e reinicie.`, ip };
+    }
     if (REGRAS_IP.length === 0) {
         return { permitido: false, motivo: "Nenhum IP autorizado em config/acesso.json — criação de login está fechada.", ip };
     }
