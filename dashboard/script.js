@@ -3,12 +3,8 @@
 // token não estiver preenchido, a tela mostra erro explícito, nunca
 // números inventados ou "de exemplo".
 const ENDPOINT = 'https://nese-be.ruexinternet.com/api/admin/dashboard/data';
-const ENDPOINT_USUARIOS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/usuarios';
 const ENDPOINT_REQUESTS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/requests';
 const ENDPOINT_LOCALIZACAO = 'https://nese-be.ruexinternet.com/api/admin/dashboard/localizacao';
-// Detalhe de um usuário: id é acrescentado na hora da chamada (ver
-// abrirDetalhesUsuario) — não dá pra montar isso como constante fixa.
-const ENDPOINT_USUARIO_DETALHE_BASE = 'https://nese-be.ruexinternet.com/api/admin/dashboard/usuarios/';
 const ENDPOINT_LOGS_CADASTRO = 'https://nese-be.ruexinternet.com/api/admin/dashboard/logs-cadastro';
 const ENDPOINT_GRAFICOS_TECNICOS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/graficos/tecnicos';
 const ENDPOINT_ERROS_POR_ROTA = 'https://nese-be.ruexinternet.com/api/admin/dashboard/erros-por-rota';
@@ -317,104 +313,6 @@ function exportarCsv(nomeArquivo, colunas, linhas) {
 
 // Guarda a última lista carregada (por id) pra abrir o modal sem precisar
 // buscar de novo dados que já vieram na listagem — o modal ainda busca o
-// detalhe completo (GET /dashboard/usuarios/:id), mas isso evita a tabela
-// piscar vazia enquanto a request de detalhe não volta.
-const usuariosCarregados = {};
-
-// Lista completa (sem filtro) da última resposta de /dashboard/usuarios —
-// a busca (ver #usuarios-busca) filtra sobre isso em memória, sem bater na
-// API a cada tecla; e o refresh de 30s reaplica o filtro atual em cima dos
-// dados novos, em vez de simplesmente sobrescrever o que a pessoa buscou.
-let usuariosListaCompleta = [];
-
-function renderUsuarios(usuarios) {
-  const tbody = document.getElementById('usuarios-tbody');
-
-  if (!usuarios || usuarios.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Nenhum usuário ativado ainda.</td></tr>';
-    return;
-  }
-
-  usuarios.forEach(u => { usuariosCarregados[u.id] = u; });
-
-  comScrollPreservado(null, () => {
-    tbody.innerHTML = usuarios.map(u => {
-      const avatarResolvido = resolverAvatarUrl(u.avatarEfetivo);
-      const avatarSrc = avatarResolvido
-        ? escaparHtml(avatarResolvido)
-        : 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3C/svg%3E';
-      const badgeClasse = u.totalPrestadores > 0 ? 'count-badge' : 'count-badge zero';
-      const dotClasse = u.online ? 'online-dot on' : 'online-dot off';
-
-      return `
-        <tr class="clickable-row" data-usuario-id="${escaparHtml(u.id)}" tabindex="0">
-          <td>
-            <div class="user-cell">
-              <span class="${dotClasse}" title="${u.online ? 'online agora' : 'offline'}"></span>
-              <img class="user-avatar" src="${avatarSrc}" alt="" loading="lazy" onerror="this.onerror=null;this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22%3E%3C/svg%3E';">
-              <div>
-                <div>${escaparHtml(u.nome)}</div>
-                <div class="last-seen">${escaparHtml(u.email || '—')}</div>
-              </div>
-            </div>
-          </td>
-          <td class="id-mono">${escaparHtml(u.id)}</td>
-          <td class="last-seen">${escaparHtml(formatarLocalizacaoResumo(u))}</td>
-          <td><span class="${badgeClasse}">${u.totalPrestadores}</span></td>
-          <td class="last-seen">${formatarDataExata(u.criadoEm)}</td>
-        </tr>
-      `;
-    }).join('');
-
-    tbody.querySelectorAll('tr.clickable-row').forEach(tr => {
-      tr.addEventListener('click', () => abrirDetalhesUsuario(tr.dataset.usuarioId));
-      tr.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          abrirDetalhesUsuario(tr.dataset.usuarioId);
-        }
-      });
-    });
-  });
-}
-
-function renderUsuariosErro(mensagem) {
-  const tbody = document.getElementById('usuarios-tbody');
-  tbody.innerHTML = `<tr><td colspan="5" class="empty-state">${escaparHtml(mensagem)}</td></tr>`;
-}
-
-// Reaplica a busca atual (#usuarios-busca) sobre usuariosListaCompleta —
-// chamada tanto ao digitar quanto depois de todo refresh de 30s.
-function aplicarFiltroUsuarios() {
-  const termo = document.getElementById('usuarios-busca').value;
-  const filtrados = filtrarLinhas(usuariosListaCompleta, termo, ['nome', 'email', 'id']);
-  if (filtrados.length === 0 && termo.trim()) {
-    comScrollPreservado(null, () => {
-      document.getElementById('usuarios-tbody').innerHTML =
-        '<tr><td colspan="5" class="empty-state">Nenhum usuário bate com essa busca.</td></tr>';
-    });
-    return;
-  }
-  renderUsuarios(filtrados);
-}
-
-document.getElementById('usuarios-busca').addEventListener('input', aplicarFiltroUsuarios);
-
-async function carregarUsuarios(token) {
-  try {
-    const res = await fetch(ENDPOINT_USUARIOS, {
-      headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
-    });
-    if (res.status === 401) throw new Error('token inválido');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    usuariosListaCompleta = data.usuarios || [];
-    aplicarFiltroUsuarios();
-  } catch (e) {
-    renderUsuariosErro(`Erro ao carregar usuários (${e.message}).`);
-  }
-}
-
 function renderRequestsErro(mensagem) {
   const tbody = document.getElementById('requests-tbody');
   tbody.innerHTML = `<tr><td colspan="7" class="empty-state">${escaparHtml(mensagem)}</td></tr>`;
@@ -1233,35 +1131,6 @@ function renderModal(data) {
   `;
 }
 
-async function abrirDetalhesUsuario(usuarioId) {
-  const token = getToken();
-  const overlay = document.getElementById('modal-overlay');
-
-  // Mostra o nome já conhecido (da listagem) imediatamente, enquanto o
-  // detalhe completo carrega — evita o modal abrir com título vazio.
-  const usuarioConhecido = usuariosCarregados[usuarioId];
-  document.getElementById('modal-titulo').textContent = usuarioConhecido ? usuarioConhecido.nome : 'Detalhes do usuário';
-  document.getElementById('modal-body').innerHTML = '<div class="empty-state">carregando…</div>';
-  overlay.removeAttribute('hidden');
-
-  if (!token) {
-    renderModalErro('Preencha o token de admin acima pra ver os detalhes.');
-    return;
-  }
-
-  try {
-    const res = await fetch(ENDPOINT_USUARIO_DETALHE_BASE + encodeURIComponent(usuarioId), {
-      headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
-    });
-    if (res.status === 401) throw new Error('token inválido');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    renderModal(data);
-  } catch (e) {
-    const mensagem = e.message === 'HTTP 404' ? 'usuário não encontrado' : e.message;
-    renderModalErro(`Não foi possível carregar os detalhes (${mensagem}).`);
-  }
-}
 
 // Modal do card "Erros hoje" (Visão geral) — lista crua de GET
 // /dashboard/erros-hoje, uma linha por request, mesma condição/janela do
@@ -2377,7 +2246,6 @@ const TITULOS_ABA = {
   'alertas': 'Alertas',
   'status': 'Status',
   'seguranca': 'Segurança',
-  'usuarios': 'Usuários',
   'oferta-demanda': 'Oferta & Demanda',
   'graficos-tecnico': 'Gráficos técnicos',
   'graficos-comercial': 'Gráficos comerciais',
@@ -2479,7 +2347,6 @@ async function load() {
 
   if (!token) {
     renderNoData();
-    renderUsuariosErro('Preencha o token de admin acima pra carregar os usuários.');
     renderRequestsErro('Preencha o token de admin acima pra carregar as requests.');
     renderLocalizacaoErro('Preencha o token de admin acima pra carregar.');
     renderLogsCadastroErro('Preencha o token de admin acima pra carregar.');
@@ -2530,7 +2397,7 @@ async function load() {
   // segurança contra alguma dessas funções um dia esquecer de tratar o
   // próprio erro (regressão futura) — não deveria disparar no uso normal.
   try {
-    await Promise.all([carregarUsuarios(token), carregarRequests(token), carregarLocalizacao(token), carregarLogsCadastro(token), carregarGraficosTecnicos(token), carregarGraficosComercial(token), carregarInsights(token), carregarMapaPrestadores(token), carregarMapaBuscasSemResultado(token), carregarAlertas(token), carregarStatus(token), carregarSeguranca(token), carregarAcessosIndevidos(token)]);
+    await Promise.all([carregarRequests(token), carregarLocalizacao(token), carregarLogsCadastro(token), carregarGraficosTecnicos(token), carregarGraficosComercial(token), carregarInsights(token), carregarMapaPrestadores(token), carregarMapaBuscasSemResultado(token), carregarAlertas(token), carregarStatus(token), carregarSeguranca(token), carregarAcessosIndevidos(token)]);
   } catch (e) {
     console.error('Uma das abas não tratou o próprio erro internamente:', e);
   }
