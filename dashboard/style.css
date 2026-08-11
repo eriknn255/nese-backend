@@ -294,6 +294,46 @@
     justify-content: flex-end;
   }
 
+  /* ==========================================================================
+     Cabeçalho de seção — título à esquerda, controles que governam aquela
+     seção na extremidade OPOSTA (direita), na MESMA linha.
+
+     Existe porque um controle solto numa linha só dele (era o caso do
+     seletor de janela da aba Segurança) fica órfão no meio da página: não
+     se lê como "pertence ao bloco de baixo" nem "ao de cima", e o olho
+     tropeça nele antes de chegar no conteúdo. Amarrado ao título, a
+     relação fica explícita — o controle governa o que aquele título
+     nomeia.
+
+     O container assume as margens que eram do .section-title (32px em
+     cima, 10px embaixo) e zera as do filho: com o título ainda carregando
+     margem própria, o alinhamento vertical passaria a contar a margem na
+     conta do align-items e o controle sairia deslocado do texto.
+
+     flex-wrap + margin-left:auto nos controles: em tela estreita eles
+     caem pra linha de baixo já encostados à direita, sem precisar de
+     media query própria.
+     ========================================================================== */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 16px;
+    flex-wrap: wrap;
+    margin: 32px 0 10px;
+  }
+
+  .section-header .section-title {
+    margin: 0;
+  }
+
+  .section-header-controles {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+  }
+
   .table-busca {
     flex: 1;
     min-width: 200px;
