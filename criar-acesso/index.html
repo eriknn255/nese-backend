@@ -45,7 +45,7 @@
   <div class="status status-erro" id="status-bloqueado" hidden>
     <strong id="bloqueado-motivo"></strong>
     <span class="ip-visto">IP visto pelo servidor: <code id="bloqueado-ip">—</code></span>
-    <span class="dica">Se este acesso deveria ser permitido, adicione o IP acima em <code>BOOTSTRAP_IPS</code> no <code>.env</code> do servidor e reinicie o serviço.</span>
+    <span class="dica">Se este acesso deveria ser permitido, adicione o IP acima em <code>backend/config/acesso.json</code>, faça commit, e no servidor rode <code>git pull &amp;&amp; pm2 restart nese-backend</code>.</span>
   </div>
 
   <form id="form" hidden>
