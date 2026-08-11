@@ -13,18 +13,22 @@ const BASE_API = 'https://nese-be.ruexinternet.com/api/admin';
 const ENDPOINT_STATUS = `${BASE_API}/bootstrap/status`;
 const ENDPOINT_CONTAS = `${BASE_API}/contas`;
 
-function mostrarBloqueio(motivo, ip) {
+// Bloqueio: uma tela morta, sem motivo, IP ou instrução — e sem sequer
+// o título/rodapé, que já revelariam pra que serve esta URL. O servidor
+// também não manda nada além de um 404 genérico (ver MENSAGEM_GENERICA
+// em redeAutorizada.js); mesmo que mandasse, não seria exibido aqui.
+function mostrarBloqueio() {
   document.getElementById('status-verificando').hidden = true;
   document.getElementById('form').hidden = true;
-  document.getElementById('bloqueado-motivo').textContent = motivo;
-  document.getElementById('bloqueado-ip').textContent = ip || '—';
   document.getElementById('status-bloqueado').hidden = false;
 }
 
-function mostrarFormulario(ip) {
+function mostrarFormulario() {
   document.getElementById('status-verificando').hidden = true;
   document.getElementById('status-bloqueado').hidden = true;
-  document.getElementById('ok-ip').textContent = ip || '—';
+  document.getElementById('titulo').hidden = false;
+  document.getElementById('subtitulo').hidden = false;
+  document.getElementById('rodape').hidden = false;
   document.getElementById('form').hidden = false;
 }
 
@@ -40,18 +44,13 @@ async function verificarRede() {
     const res = await fetch(ENDPOINT_STATUS);
     const data = await res.json().catch(() => ({}));
 
-    if (!res.ok) {
-      return mostrarBloqueio(data.erro || `Não foi possível verificar (HTTP ${res.status}).`, data.ip);
-    }
-    if (!data.permitido) {
-      return mostrarBloqueio(data.motivo || 'Acesso não autorizado a partir desta rede.', data.ip);
-    }
-    mostrarFormulario(data.ip);
+    // Qualquer coisa que não seja um "permitido: true" explícito vira a
+    // mesma tela morta — inclusive erro de rede. Nunca mostra o
+    // formulário "no escuro".
+    if (!res.ok || !data.permitido) return mostrarBloqueio();
+    mostrarFormulario();
   } catch (e) {
-    // Servidor fora do ar / CORS / rede caiu: não dá pra afirmar que está
-    // liberado, então trata como bloqueio — nunca mostra o formulário "no
-    // escuro". Se estiver liberado mesmo, recarregar resolve.
-    mostrarBloqueio('Não foi possível falar com o servidor.', null);
+    mostrarBloqueio();
   }
 }
 
@@ -77,12 +76,10 @@ document.getElementById('form').addEventListener('submit', async (ev) => {
     });
     const data = await res.json().catch(() => ({}));
 
-    // 403 aqui = a janela fechou entre o carregamento da página e o envio
+    // 404 aqui = a janela fechou entre o carregamento da página e o envio
     // (horário virou, IP mudou). Volta pro estado de bloqueio em vez de
     // deixar um formulário que não funciona mais na tela.
-    if (res.status === 403) {
-      return mostrarBloqueio(data.erro || 'Acesso não autorizado a partir desta rede.', data.ip);
-    }
+    if (res.status === 404) return mostrarBloqueio();
     if (!res.ok) throw new Error(data.erro || `Falha ao criar (HTTP ${res.status}).`);
 
     mostrarMensagem(`Login "${data.email}" criado como ${data.nivel}. Já dá pra entrar no painel.`, false);
