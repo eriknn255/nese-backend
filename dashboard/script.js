@@ -13,8 +13,6 @@ const ENDPOINT_LOGS_CADASTRO = 'https://nese-be.ruexinternet.com/api/admin/dashb
 const ENDPOINT_GRAFICOS_TECNICOS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/graficos/tecnicos';
 const ENDPOINT_ERROS_POR_ROTA = 'https://nese-be.ruexinternet.com/api/admin/dashboard/erros-por-rota';
 const ENDPOINT_GRAFICOS_COMERCIAL = 'https://nese-be.ruexinternet.com/api/admin/dashboard/graficos/comercial';
-const ENDPOINT_RETENCAO = 'https://nese-be.ruexinternet.com/api/admin/dashboard/retencao';
-const ENDPOINT_FUNIL = 'https://nese-be.ruexinternet.com/api/admin/dashboard/funil';
 const ENDPOINT_CONTAS_MORTAS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/contas-mortas';
 const ENDPOINT_AVALIACOES_INSIGHTS = 'https://nese-be.ruexinternet.com/api/admin/dashboard/avaliacoes-insights';
 const ENDPOINT_WHATSAPP = 'https://nese-be.ruexinternet.com/api/admin/dashboard/whatsapp';
@@ -1347,69 +1345,13 @@ const LIMITE_ERROS_HOJE_MODAL = 200;
 // ---- Retenção & Ativação / Avaliações / Cobertura / WhatsApp ----
 // Continuam carregando tudo junto em carregarInsights() (chamado de load()),
 // só o HTML de destino é que mudou: cada bloco agora mora na aba mais
-// próxima do que ele mede (retenção/funil/contas mortas → aba "Retenção &
-// Ativação"; nota média/expiração → aba "Avaliações"; cobertura → aba
-// "Localização"; WhatsApp → aba "Gráficos comerciais"), em vez de tudo
-// empilhado numa aba genérica "Insights".
-
-function renderTabelaRetencao(coortes) {
-  const container = document.getElementById('tabela-retencao');
-  if (!coortes || coortes.length === 0) {
-    container.innerHTML = '<div class="empty-state">Nenhuma ativação na janela analisada.</div>';
-    return;
-  }
-  const maxSemana = Math.max(...coortes.map(c => c.pontos.length - 1), 0);
-  const cabecalho = Array.from({ length: maxSemana + 1 }, (_, i) => `<th>Sem. ${i}</th>`).join('');
-  const linhas = coortes.map(c => {
-    const celulas = Array.from({ length: maxSemana + 1 }, (_, i) => {
-      const ponto = c.pontos[i];
-      return `<td>${ponto ? ponto.percentual.toFixed(0) + '%' : '—'}</td>`;
-    }).join('');
-    return `<tr><td>${escaparHtml(c.coorteInicio)} <span class="last-seen">(${c.totalUsuarios})</span></td>${celulas}</tr>`;
-  }).join('');
-  container.innerHTML = `<table><thead><tr><th>Coorte</th>${cabecalho}</tr></thead><tbody>${linhas}</tbody></table>`;
-}
-
-async function carregarRetencao(token) {
-  try {
-    const res = await fetch(ENDPOINT_RETENCAO, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
-    if (res.status === 401) throw new Error('token inválido');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    renderTabelaRetencao(data.coortes);
-  } catch (e) {
-    document.getElementById('tabela-retencao').innerHTML = `<div class="empty-state">Erro ao carregar (${e.message}).</div>`;
-  }
-}
+// próxima do que ele mede (contas inativas → "Visão geral"; contas
+// excluídas → "Logs de ativação"; nota média/expiração → aba
+// "Avaliações"; cobertura → aba "Localização"; WhatsApp → aba "Gráficos
+// comerciais"), em vez de tudo empilhado numa aba genérica "Insights".
 
 function formatarPercentual(valor) {
   return `${valor.toFixed(1)}%`;
-}
-
-function renderFunil(data) {
-  document.getElementById('funil-servico-pct').textContent = formatarPercentual(data.primeiroServico.percentual);
-  document.getElementById('funil-avaliacao-pct').textContent = formatarPercentual(data.primeiraAvaliacao.percentual);
-  document.getElementById('funil-salvo-pct').textContent = formatarPercentual(data.primeiroSalvo.percentual);
-  document.getElementById('funil-whatsapp-pct').textContent = formatarPercentual(data.primeiroCliqueWhatsapp.percentual);
-
-  function tempoTexto(etapa) {
-    return etapa.tempoMedioDias != null ? `${etapa.tempoMedioDias.toFixed(1)} dia(s) em média até a primeira vez` : 'sem dados de tempo ainda';
-  }
-  document.getElementById('funil-detalhe').textContent =
-    `Serviço: ${tempoTexto(data.primeiroServico)} · Avaliação: ${tempoTexto(data.primeiraAvaliacao)} · Salvo: ${tempoTexto(data.primeiroSalvo)} · Clique WhatsApp: ${tempoTexto(data.primeiroCliqueWhatsapp)}`;
-}
-
-async function carregarFunil(token) {
-  try {
-    const res = await fetch(ENDPOINT_FUNIL, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
-    if (res.status === 401) throw new Error('token inválido');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    renderFunil(data);
-  } catch (e) {
-    ['funil-servico-pct', 'funil-avaliacao-pct', 'funil-salvo-pct', 'funil-whatsapp-pct'].forEach(id => document.getElementById(id).textContent = '—');
-    document.getElementById('funil-detalhe').textContent = `Erro ao carregar (${e.message}).`;
-  }
 }
 
 function renderContasMortas(data) {
@@ -1984,9 +1926,6 @@ async function carregarMapaBuscasSemResultado(token) {
 }
 
 function renderInsightsErro(mensagem) {
-  document.getElementById('tabela-retencao').innerHTML = `<div class="empty-state">${escaparHtml(mensagem)}</div>`;
-  ['funil-servico-pct', 'funil-avaliacao-pct', 'funil-salvo-pct', 'funil-whatsapp-pct'].forEach(id => document.getElementById(id).textContent = '—');
-  document.getElementById('funil-detalhe').textContent = mensagem;
   document.getElementById('stat-contas-mortas-total').textContent = '—';
   document.getElementById('contas-mortas-tbody').innerHTML = `<tr><td colspan="4" class="empty-state">${escaparHtml(mensagem)}</td></tr>`;
   document.getElementById('stat-expiracao-automatica').textContent = '—';
@@ -2395,8 +2334,6 @@ async function carregarAcessosIndevidos(token) {
 // Independentes entre si, igual o resto — roda tudo em paralelo.
 async function carregarInsights(token) {
   await Promise.all([
-    carregarRetencao(token),
-    carregarFunil(token),
     carregarContasMortas(token),
     carregarChurn(token),
     carregarAvaliacoesInsights(token),
@@ -2446,7 +2383,6 @@ const TITULOS_ABA = {
   'graficos-comercial': 'Gráficos comerciais',
   'logs-cadastro': 'Logs de ativação',
   'requests': 'Requests',
-  'retencao': 'Retenção & Ativação',
   'avaliacoes': 'Avaliações'
 };
 
