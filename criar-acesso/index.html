@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Criar acesso — Nese</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/google-sans-flex/wght.css">
+</head>
+<body>
+
+<!-- ==========================================================================
+     CRIAR ACESSO — página de bootstrap. Existe pra resolver o paradoxo do
+     desenho anterior: entrar na moderação exige login, mas o único lugar
+     pra criar login era dentro da moderação — ninguém entrava da primeira
+     vez sem recorrer a curl.
+
+     NÃO exige sessão (é justamente a página de quem ainda não tem uma).
+     A proteção é server-side, em POST /api/admin/contas:
+       - allowlist de IP (BOOTSTRAP_IPS)  <- a trava de verdade
+       - janela de horário (BOOTSTRAP_HORARIO)
+       - país por geo-IP (BOOTSTRAP_PAISES, opcional)
+       - ADMIN_TOKEN por cima de tudo
+     Ver backend/src/middleware/redeAutorizada.js.
+
+     Esta página NÃO decide nada sobre permissão — ela só pergunta ao
+     servidor e mostra a resposta. Esconder o formulário no cliente é
+     conveniência de UX, nunca segurança: quem ignorar o HTML e chamar a
+     rota direto bate na mesma trava.
+
+     NÃO deve ser linkada do dashboard nem da moderação, e o
+     <meta robots> acima mantém ela fora de buscador.
+     ========================================================================== -->
+
+<main class="caixa">
+  <img src="/dashboard/img/logo-nese.webp" alt="Nese" width="44" height="44">
+  <h1>Criar acesso</h1>
+  <p class="sub">Gera um login para o dashboard e a moderação.</p>
+
+  <!-- Estado inicial: ninguém vê formulário antes do servidor responder
+       se esta rede está liberada. -->
+  <div class="status" id="status-verificando">Verificando esta rede…</div>
+
+  <div class="status status-erro" id="status-bloqueado" hidden>
+    <strong id="bloqueado-motivo"></strong>
+    <span class="ip-visto">IP visto pelo servidor: <code id="bloqueado-ip">—</code></span>
+    <span class="dica">Se este acesso deveria ser permitido, adicione o IP acima em <code>BOOTSTRAP_IPS</code> no <code>.env</code> do servidor e reinicie o serviço.</span>
+  </div>
+
+  <form id="form" hidden>
+    <div class="status status-ok">
+      Rede autorizada · <code id="ok-ip">—</code>
+    </div>
+
+    <label>
+      <span>Token de admin do servidor</span>
+      <input type="password" id="token" autocomplete="off" required
+             placeholder="ADMIN_TOKEN do .env">
+    </label>
+
+    <label>
+      <span>Nome</span>
+      <input type="text" id="nome" required>
+    </label>
+
+    <label>
+      <span>E-mail</span>
+      <input type="email" id="email" autocomplete="off" required>
+    </label>
+
+    <label>
+      <span>Senha (mínimo 10 caracteres)</span>
+      <input type="password" id="senha" autocomplete="new-password" minlength="10" required>
+    </label>
+
+    <label>
+      <span>Nível de acesso</span>
+      <select id="nivel">
+        <option value="full">full — dashboard + moderação</option>
+        <option value="ver">ver — somente dashboard</option>
+      </select>
+    </label>
+
+    <div class="msg" id="msg" hidden></div>
+
+    <button type="submit" id="btn">Criar login</button>
+  </form>
+
+  <p class="rodape">
+    Esta página não cria sessão. Depois de criar o login, entre pelo
+    <a href="/dashboard/">dashboard</a> ou pela <a href="/moderacao/">moderação</a>.
+  </p>
+</main>
+
+<script src="script.js"></script>
+</body>
+</html>
