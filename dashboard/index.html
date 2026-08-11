@@ -75,10 +75,12 @@
     </button>
     <button type="button" class="sidebar-link" data-aba="requests" title="Requests">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Requests</span>
-      <span class="sidebar-badge" id="sidebar-badge-seguranca" hidden>0</span>
     </button>
     <button type="button" class="sidebar-link sidebar-link-tecnico" data-aba="seguranca" title="Segurança">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Segurança</span>
+      <!-- Contador de IPs sinalizados. Estava no botão de Requests, o que
+           fazia o número da Segurança aparecer na aba vizinha. -->
+      <span class="sidebar-badge" id="sidebar-badge-seguranca" hidden>0</span>
     </button>
     <button type="button" class="sidebar-link" data-aba="usuarios" title="Usuários">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Usuários</span>
@@ -94,9 +96,6 @@
     </button>
     <button type="button" class="sidebar-link sidebar-link-tecnico" data-aba="logs-cadastro" title="Logs de ativação">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Logs de ativação</span>
-    </button>
-    <button type="button" class="sidebar-link" data-aba="retencao" title="Retenção &amp; Ativação">
-      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Retenção &amp; Ativação</span>
     </button>
     <button type="button" class="sidebar-link" data-aba="avaliacoes" title="Avaliações">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Avaliações</span>
@@ -146,6 +145,10 @@
           <div class="stat-value green" id="stat-online-agora">—</div>
         </div>
         <div class="stat-card">
+          <div class="stat-label">Total de contas inativas</div>
+          <div class="stat-value red" id="stat-contas-mortas-total">—</div>
+        </div>
+        <div class="stat-card">
           <div class="stat-label">Ativações de conta  /mês</div>
           <div class="stat-value green" id="stat-ativacoes-conta-mes">—</div>
         </div>
@@ -169,6 +172,23 @@
                (baixo/medio/alto) em atualizarBadgeErrosHoje, script.js. -->
           <span class="stat-pct-badge" id="stat-erros-pct-badge" hidden></span>
         </div>
+      </div>
+
+      <div class="section-title">Contas inativas <span class="section-note">(sem atividade autenticada há mais de 30 dias, ou nunca voltaram)</span></div>
+      <div class="requests-panel" id="contas-mortas-panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Nome</th>
+              <th>Email</th>
+              <th>Criado em</th>
+              <th>Última atividade</th>
+            </tr>
+          </thead>
+          <tbody id="contas-mortas-tbody">
+            <tr><td colspan="4" class="empty-state">carregando…</td></tr>
+          </tbody>
+        </table>
       </div>
 
       <div class="section-title">Densidade de usuários <span class="section-note">(todos os usuários com localização resolvida - Brasil inteiro)</span></div>
@@ -655,6 +675,26 @@
         <input type="search" id="logs-cadastro-busca" class="table-busca" placeholder="Buscar por nome, e-mail ou IP…">
         <button type="button" id="logs-cadastro-exportar-btn" class="toolbar-btn">Exportar CSV</button>
       </div>
+<div class="section-title">Contas excluídas</div>
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-label">Criadas</div>
+          <div class="stat-value green" id="stat-churn-criadas">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Excluídas</div>
+          <div class="stat-value red" id="stat-churn-excluidas">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Crescimento líquido</div>
+          <div class="stat-value gold" id="stat-churn-liquido">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Tempo médio até excluir</div>
+          <div class="stat-value" id="stat-churn-tempo-medio">—</div>
+        </div>
+      </div>
+
       <div class="requests-panel" id="logs-cadastro-panel">
         <table>
           <thead>
@@ -678,79 +718,6 @@
     </section>
 
     <!-- ==================== ABA: RETENÇÃO & ATIVAÇÃO ==================== -->
-    <section class="aba-conteudo" id="aba-retencao" hidden>
-
-      <div class="section-title">Retenção por coorte <span class="section-note">(% de cada leva semanal de ativações que voltou a usar o app N semanas depois)</span></div>
-      <div class="chart-card">
-        <div id="tabela-retencao"><div class="empty-state">carregando…</div></div>
-      </div>
-
-      <div class="section-title">Funil de ativação <span class="section-note">(% de todas as contas que já fizeram cada ação, e tempo médio até a primeira vez)</span></div>
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-label">1º serviço cadastrado</div>
-          <div class="stat-value teal" id="funil-servico-pct">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">1ª avaliação feita</div>
-          <div class="stat-value blue" id="funil-avaliacao-pct">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">1º prestador salvo</div>
-          <div class="stat-value purple" id="funil-salvo-pct">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">1º clique WhatsApp</div>
-          <div class="stat-value green" id="funil-whatsapp-pct">—</div>
-        </div>
-      </div>
-      <div class="refresh-note" id="funil-detalhe">carregando…</div>
-
-      <div class="section-title">Contas excluídas <span class="section-note">(últimos 14 dias — criadas vs excluídas no mesmo período, ver auditoria_contas)</span></div>
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-label">Criadas</div>
-          <div class="stat-value green" id="stat-churn-criadas">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Excluídas</div>
-          <div class="stat-value red" id="stat-churn-excluidas">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Crescimento líquido</div>
-          <div class="stat-value gold" id="stat-churn-liquido">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Tempo médio até excluir</div>
-          <div class="stat-value" id="stat-churn-tempo-medio">—</div>
-        </div>
-      </div>
-
-      <div class="section-title">Contas inativas <span class="section-note">(sem atividade autenticada há mais de 30 dias, ou nunca voltaram)</span></div>
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-label">Total de contas inativas</div>
-          <div class="stat-value red" id="stat-contas-mortas-total">—</div>
-        </div>
-      </div>
-      <div class="requests-panel" id="contas-mortas-panel">
-        <table>
-          <thead>
-            <tr>
-              <th>Nome</th>
-              <th>Email</th>
-              <th>Criado em</th>
-              <th>Última atividade</th>
-            </tr>
-          </thead>
-          <tbody id="contas-mortas-tbody">
-            <tr><td colspan="4" class="empty-state">carregando…</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-    </section>
-
     <!-- ==================== ABA: AVALIAÇÕES ==================== -->
     <section class="aba-conteudo" id="aba-avaliacoes" hidden>
 
