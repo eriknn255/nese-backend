@@ -4,6 +4,13 @@
 -- CHAVE_AVALIACOES_PENDENTES, CHAVE_CLIQUES_WHATSAPP e o array PRESTADORES).
 -- CHAVE_CONFIG_APP NÃO tem tabela aqui — é preferência de aparelho (tema,
 -- notificação), não faz sentido morar no servidor. Continua 100% local.
+--
+-- ESTE ARQUIVO NÃO É A ESTRUTURA COMPLETA DO BANCO. As tabelas
+-- buscas_sem_resultado, ip_lookup_cache, log_auditoria_moderacao e admins
+-- são criadas direto em db.js (CREATE TABLE IF NOT EXISTS, mesmo padrão
+-- de migração usado ali), não aqui — ver comentários correspondentes em
+-- db.js pra contexto de cada uma. Antes de assumir "o banco tem só essas
+-- 9 tabelas", cheque db.js também.
 -- ==========================================================================
 
 -- Identidade agora é Google OAuth (google_sub + email) em vez de telefone
