@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
 const db = require("../db");
 const { exigirNivel } = require("../middleware/identidadeAdmin");
+const { exigirRedeAutorizada, avaliarAcesso } = require("../middleware/redeAutorizada");
 const { hashSenha, verificarSenha } = require("../utils/senha");
 const { registrarAuditoria, diffCampos } = require("../utils/auditoria");
 const { obterLocalizacoesEmLote } = require("../utils/ipLocalizacao");
@@ -80,11 +81,33 @@ function normalizarEmailAdmin(valor) {
     return String(valor || "").trim().toLowerCase();
 }
 
+// GET /api/admin/bootstrap/status — a página criar-acesso/ chama isso
+// ANTES de mostrar o formulário, pra dizer de cara "seu IP não está
+// liberado" em vez de deixar a pessoa digitar tudo e tomar 403 no final.
+// Sem token de propósito: não revela nada além do IP de quem perguntou
+// (que já é dele) e de se a janela está aberta. Quem decide de verdade é
+// o middleware na rota de criação, não esta resposta.
+router.get("/bootstrap/status", (req, res) => {
+    avaliarAcesso(req)
+        .then(resultado => res.json(resultado))
+        .catch(() => res.status(500).json({ erro: "Não foi possível validar o acesso agora." }));
+});
+
 // POST /api/admin/contas — cria um login novo. ÚNICA rota protegida pelo
-// ADMIN_TOKEN estático. Um 'full' logado NÃO pode criar conta: quem cria
-// acesso precisa do segredo do servidor, ponto — senão bastaria uma conta
-// full vazada pra alguém fabricar acessos permanentes pra si mesmo.
-router.post("/contas", exigirAdmin, (req, res) => {
+// ADMIN_TOKEN estático, e a única porta de entrada quando ainda não
+// existe login nenhum (ver criar-acesso/index.html).
+//
+// DUAS travas independentes, nesta ordem:
+//   1. exigirRedeAutorizada — IP/horário/país (ver middleware). Barra
+//      antes mesmo de olhar o token, pra não expor a comparação do
+//      segredo a quem nem deveria alcançar a rota.
+//   2. exigirAdmin — o ADMIN_TOKEN do .env.
+// Estar na rede certa não basta; ter o token não basta. Precisa dos dois.
+//
+// Um 'full' logado NÃO pode criar conta: quem cria acesso precisa do
+// segredo do servidor, senão bastaria uma sessão vazada pra alguém
+// fabricar acessos permanentes pra si mesmo.
+router.post("/contas", exigirRedeAutorizada, exigirAdmin, (req, res) => {
     if (!ADMIN_SESSION_SECRET) {
         return res.status(500).json({ erro: "Servidor sem ADMIN_SESSION_SECRET configurado (ver .env)." });
     }
