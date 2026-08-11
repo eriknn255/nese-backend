@@ -1,0 +1,48 @@
+# ==========================================================================
+# SEGREDOS — nunca versionar. O .env de produção tem JWT_SECRET,
+# ADMIN_SESSION_SECRET e ADMIN_TOKEN; quem tiver o arquivo tem o painel
+# inteiro. O .env.example (esse SIM vai pro Git) documenta cada variável
+# com valores de exemplo descartáveis.
+# ==========================================================================
+.env
+.env.local
+.env.*.local
+
+# ==========================================================================
+# DEPENDÊNCIAS — reinstaláveis com `npm ci` a partir do package-lock.json.
+# better-sqlite3 e sharp compilam binário nativo por plataforma (Windows no
+# dev, Linux na EC2), então versionar node_modules quebraria o deploy.
+# ==========================================================================
+node_modules/
+
+# ==========================================================================
+# BANCO — o SQLite real vive em ~/Nese/backend/data/mase.db na EC2 e é
+# dado de produção (contas, prestadores, auditoria), não código. O schema
+# fica em backend/src/schema.sql + as migrações de db.js.
+# -wal/-shm são arquivos temporários do modo WAL do SQLite.
+# ==========================================================================
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ==========================================================================
+# UPLOADS — avatares, fotos e vídeos de capa enviados pelos usuários
+# (backend/storage/, servido estático pelo Express). É conteúdo de
+# usuário, não código; some do Git mas continua no disco da EC2.
+# ==========================================================================
+backend/storage/
+
+# Logs e artefatos de runtime
+*.log
+npm-debug.log*
+.pm2/
+
+# Lixo de sistema operacional / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
