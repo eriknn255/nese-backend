@@ -6,7 +6,7 @@ const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
 const db = require("../db");
 const { exigirNivel } = require("../middleware/identidadeAdmin");
-const { exigirRedeAutorizada, avaliarAcesso } = require("../middleware/redeAutorizada");
+const { exigirRedeAutorizada, avaliarAcesso, MENSAGEM_GENERICA } = require("../middleware/redeAutorizada");
 const { hashSenha, verificarSenha } = require("../utils/senha");
 const { registrarAuditoria, diffCampos } = require("../utils/auditoria");
 const { obterLocalizacoesEmLote } = require("../utils/ipLocalizacao");
@@ -82,15 +82,23 @@ function normalizarEmailAdmin(valor) {
 }
 
 // GET /api/admin/bootstrap/status — a página criar-acesso/ chama isso
-// ANTES de mostrar o formulário, pra dizer de cara "seu IP não está
-// liberado" em vez de deixar a pessoa digitar tudo e tomar 403 no final.
-// Sem token de propósito: não revela nada além do IP de quem perguntou
-// (que já é dele) e de se a janela está aberta. Quem decide de verdade é
-// o middleware na rota de criação, não esta resposta.
+// antes de mostrar o formulário.
+//
+// Responde APENAS { permitido: true } ou 404 genérico. Sem motivo, sem
+// IP, sem pista nenhuma do que barrou (ver MENSAGEM_GENERICA em
+// redeAutorizada.js): pra quem não passou, esta rota é indistinguível de
+// uma URL inexistente. O diagnóstico de verdade — qual IP tentou, qual
+// regra barrou — sai no log do servidor, que só o administrador lê.
 router.get("/bootstrap/status", (req, res) => {
     avaliarAcesso(req)
-        .then(resultado => res.json(resultado))
-        .catch(() => res.status(500).json({ erro: "Não foi possível validar o acesso agora." }));
+        .then(resultado => {
+            if (!resultado.permitido) {
+                console.warn(`[bootstrap] status negado ip=${resultado.ip} motivo=${resultado.motivoInterno}`);
+                return res.status(404).json({ erro: MENSAGEM_GENERICA });
+            }
+            res.json({ permitido: true });
+        })
+        .catch(() => res.status(500).json({ erro: MENSAGEM_GENERICA }));
 });
 
 // POST /api/admin/contas — cria um login novo. ÚNICA rota protegida pelo
