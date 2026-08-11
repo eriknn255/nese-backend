@@ -249,7 +249,12 @@ router.get("/:id", (req, res) => {
 // o nome da conta no momento da criação, mas nunca mais lida depois disso.
 router.post("/", exigirUsuario, (req, res) => {
     const categoria = sanitizarTexto(req.body.categoria, 60);
-    const descricao = sanitizarTexto(req.body.descricao, 460) || null;
+    // 1000: mesmo limite do maxlength do <textarea name="descricao"> em
+    // 04-cad-prestador.tpl — antes era 460 aqui, então qualquer descrição
+    // entre 461 e 1000 caracteres passava no front sem erro nenhum e era
+    // truncada em silêncio ao salvar (sem aviso, sem 400 — só sumia metade
+    // do texto). Os dois lados precisam concordar no mesmo teto.
+    const descricao = sanitizarTexto(req.body.descricao, 1000) || null;
     const telefone = sanitizarTexto(req.body.telefone, 30);
     const cor = sanitizarTexto(req.body.cor, 30) || "#2f6fed";
     const { lat, lng, horarioAbre, horarioFecha } = req.body;
@@ -338,7 +343,7 @@ router.patch("/:id", exigirUsuario, exigirDono, (req, res) => {
     // formatarPrestador.js). Se vier no corpo (front antigo em cache,
     // por exemplo), é simplesmente ignorado.
     const categoria = req.body.categoria !== undefined ? sanitizarTexto(req.body.categoria, 60) : atual.categoria;
-    const descricao = req.body.descricao !== undefined ? (sanitizarTexto(req.body.descricao, 460) || null) : atual.descricao;
+    const descricao = req.body.descricao !== undefined ? (sanitizarTexto(req.body.descricao, 1000) || null) : atual.descricao;
     const telefone = req.body.telefone !== undefined ? sanitizarTexto(req.body.telefone, 30) : atual.telefone;
     const lat = typeof req.body.lat === "number" ? req.body.lat : atual.lat;
     const lng = typeof req.body.lng === "number" ? req.body.lng : atual.lng;
