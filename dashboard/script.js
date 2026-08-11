@@ -180,11 +180,12 @@ function render(data) {
   // no endpoint (só mudou de card/posição e ganhou um rótulo mais claro).
   document.getElementById('stat-ativacoes-conta-mes').textContent = data.stats.ativacoesMes;
   // "Exclusões de conta/mês" e "Prestadores do mês (Top 1 serviço mais
-  // procurado)" são métricas NOVAS que o backend ainda não calcula em
-  // GET /dashboard/data — precisam dos campos data.stats.exclusoesMes
-  // (number) e data.stats.prestadoresMesTopServico (string, nome da
-  // categoria) em routes/admin.js. Até lá ficam em "—", igual ao resto do
-  // painel quando falta dado — este dashboard não inventa número.
+  // procurado)" vêm de data.stats.exclusoesMes (number) e
+  // data.stats.prestadoresMesTopServico (string, categoria + contagem),
+  // já calculados em GET /dashboard/data. O `!= null` cobre o caso
+  // legítimo de mês sem exclusão/sem prestador novo (backend manda null,
+  // não 0 nem string vazia) — nesse caso vira "—", igual ao resto do
+  // painel quando falta dado. Este dashboard não inventa número.
   document.getElementById('stat-exclusoes-conta-mes').textContent =
     data.stats.exclusoesMes != null ? data.stats.exclusoesMes : '—';
   document.getElementById('stat-prestadores-mes-top-servico').textContent =
