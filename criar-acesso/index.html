@@ -35,24 +35,26 @@
 
 <main class="caixa">
   <img src="/dashboard/img/logo-nese.webp" alt="Nese" width="44" height="44">
-  <h1>Criar acesso</h1>
-  <p class="sub">Gera um login para o dashboard e a moderação.</p>
+  <!-- Título e subtítulo só aparecem depois de autorizado (ver
+       mostrarFormulario em script.js): "Criar acesso / gera um login pro
+       dashboard" já é informação demais pra quem não deveria estar aqui. -->
+  <h1 id="titulo" hidden>Criar acesso</h1>
+  <p class="sub" id="subtitulo" hidden>Gera um login para o dashboard e a moderação.</p>
 
   <!-- Estado inicial: ninguém vê formulário antes do servidor responder
        se esta rede está liberada. -->
-  <div class="status" id="status-verificando">Verificando esta rede…</div>
+  <div class="status" id="status-verificando">Carregando…</div>
 
-  <div class="status status-erro" id="status-bloqueado" hidden>
-    <strong id="bloqueado-motivo"></strong>
-    <span class="ip-visto">IP visto pelo servidor: <code id="bloqueado-ip">—</code></span>
-    <span class="dica">Se este acesso deveria ser permitido, adicione o IP acima em <code>backend/config/acesso.json</code>, faça commit, e no servidor rode <code>git pull &amp;&amp; pm2 restart nese-backend</code>.</span>
+  <!-- Bloqueio: nada de motivo, IP ou instrução. Quem não passou não
+       aprende que existe allowlist, janela de horário ou arquivo de
+       config — só vê uma página que não leva a lugar nenhum. Pra liberar
+       um acesso legítimo, o IP e o motivo saem no log do servidor
+       (`pm2 logs nese-backend | grep bootstrap`). -->
+  <div class="status" id="status-bloqueado" hidden>
+    Página indisponível.
   </div>
 
   <form id="form" hidden>
-    <div class="status status-ok">
-      Rede autorizada · <code id="ok-ip">—</code>
-    </div>
-
     <label>
       <span>Token de admin do servidor</span>
       <input type="password" id="token" autocomplete="off" required
@@ -87,7 +89,8 @@
     <button type="submit" id="btn">Criar login</button>
   </form>
 
-  <p class="rodape">
+  <!-- Rodapé com links pros painéis: idem, só depois de autorizado. -->
+  <p class="rodape" id="rodape" hidden>
     Esta página não cria sessão. Depois de criar o login, entre pelo
     <a href="/dashboard/">dashboard</a> ou pela <a href="/moderacao/">moderação</a>.
   </p>
