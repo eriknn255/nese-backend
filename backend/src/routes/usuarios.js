@@ -9,6 +9,7 @@ const path = require("path");
 const db = require("../db");
 const { sanitizarTexto } = require("../utils/sanitizar");
 const { exigirUsuario } = require("../middleware/identidade");
+const { registrarAuditoria, diffCampos } = require("../utils/auditoria");
 const { formatarPrestador, SELECT_PRESTADORES_COM_NOTA } = require("../utils/formatarPrestador");
 const { criarNotificacao } = require("../utils/criarNotificacao");
 const { validarTelefone } = require("../utils/telefone");
@@ -261,6 +262,7 @@ router.patch("/:id", exigirUsuario, (req, res) => {
     if (!nome) return res.status(400).json({ erro: "nome é obrigatório." });
 
     const atual = db.prepare("SELECT telefone, cpf_cnpj FROM usuarios WHERE id = ?").get(req.params.id);
+    const nomeAntes = req.usuario.nome;
 
     // req.body.telefone === undefined (campo nem veio no corpo, ex: front
     // em cache mandando só {nome}) preserva o que já estava salvo — só uma
@@ -292,6 +294,21 @@ router.patch("/:id", exigirUsuario, (req, res) => {
     }
 
     db.prepare("UPDATE usuarios SET nome = ?, telefone = ?, cpf_cnpj = ? WHERE id = ?").run(nome, telefone, cpfCnpj, req.params.id);
+
+    // Auditoria da própria conta (ver utils/auditoria.js) — mesma tabela
+    // que a moderação usa, origem='usuario' porque quem editou foi o
+    // próprio dono (já confirmado acima: req.usuario.id === req.params.id).
+    const alteracoesPerfil = diffCampos(
+        { nome: nomeAntes, telefone: atual?.telefone ?? null, cpfCnpj: atual?.cpf_cnpj ?? null },
+        { nome, telefone, cpfCnpj }
+    );
+    if (alteracoesPerfil) {
+        registrarAuditoria({
+            ator: "O próprio usuário", origem: "usuario", acao: "editar",
+            entidadeTipo: "usuario", entidadeId: req.params.id, alteracoes: alteracoesPerfil
+        });
+    }
+
     // Reconsulta em vez de montar a mão: evita depender de exigirUsuario
     // já trazer avatarUrl no formato certo (req.usuario vem do middleware,
     // que pode ter sido escrito antes dessa coluna existir).
@@ -472,6 +489,16 @@ router.delete("/:id", exigirUsuario, (req, res) => {
         console.error("Falha ao excluir conta:", erro);
         return res.status(500).json({ erro: "Não foi possível excluir a conta agora. Tente de novo em instantes." });
     }
+
+    // Mesma disciplina de privacidade de auditoria_contas: nada de nome/
+    // e-mail/telefone sobrevivendo aqui, só o suficiente pra provar QUE a
+    // conta existiu e quando foi excluída (ver comentário equivalente em
+    // routes/admin.js).
+    registrarAuditoria({
+        ator: "O próprio usuário", origem: "usuario", acao: "excluir",
+        entidadeTipo: "usuario", entidadeId: req.params.id,
+        alteracoes: { criadoEm: usuario.criado_em }
+    });
 
     // Fora da transação de propósito — são arquivos, não SQL; não rodam
     // nem revertem junto com o COMMIT/ROLLBACK do banco acima. Só chega
