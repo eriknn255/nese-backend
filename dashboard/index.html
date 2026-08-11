@@ -82,9 +82,6 @@
            fazia o número da Segurança aparecer na aba vizinha. -->
       <span class="sidebar-badge" id="sidebar-badge-seguranca" hidden>0</span>
     </button>
-    <button type="button" class="sidebar-link" data-aba="usuarios" title="Usuários">
-      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Usuários</span>
-    </button>
     <button type="button" class="sidebar-link" data-aba="oferta-demanda" title="Oferta &amp; Demanda">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Oferta &amp; Demanda</span>
     </button>
@@ -401,27 +398,6 @@
     </section>
 
     <!-- ==================== ABA: USUÁRIOS ==================== -->
-    <section class="aba-conteudo" id="aba-usuarios" hidden>
-      <div class="section-title">Usuários <span class="section-note">(clique numa linha pra ver os detalhes)</span></div>
-      <div class="table-toolbar">
-        <input type="search" id="usuarios-busca" class="table-busca" placeholder="Buscar por nome, e-mail ou ID…">
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Usuário</th>
-            <th>ID</th>
-            <th>Localização</th>
-            <th>Serviços</th>
-            <th>Criado em</th>
-          </tr>
-        </thead>
-        <tbody id="usuarios-tbody">
-          <tr><td colspan="5" class="empty-state">carregando…</td></tr>
-        </tbody>
-      </table>
-    </section>
-
     <!-- ==================== ABA: OFERTA & DEMANDA ==================== -->
     <!-- Antes "Localização" — misturava geografia de usuário e de
          prestador com sinais de negócio (buscas sem resultado, gap de
