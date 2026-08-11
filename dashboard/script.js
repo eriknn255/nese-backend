@@ -759,18 +759,33 @@ function formatarTooltipCadastros(valor) {
 // controlada pelo seletor #cadastros-periodo-seletor. Persiste através do
 // refresh automático de 30s (mesmo raciocínio de limiteRequests/
 // limiteLogsCadastro, acima) — só muda quando a pessoa clica outro botão.
-let diasCadastros = 14;
+const JANELA_CADASTROS_KEY = 'nese-graficos-cadastros-janela';
 
-function renderGraficoCadastrosPorDia(linhas) {
+function obterJanelaCadastros() {
+  try {
+    return localStorage.getItem(JANELA_CADASTROS_KEY) || '14';
+  } catch (e) {
+    return '14';
+  }
+}
+
+// String, não número: precisa comportar 'tudo' junto com '7'/'14'/'30'.
+let diasCadastros = obterJanelaCadastros();
+
+function renderGraficoCadastrosPorDia(linhas, granularidade) {
   ultimoCadastrosPorDia = linhas;
 
   if (!linhas || linhas.length === 0) {
-    renderGraficoErro('chart-cadastros-dia', `Nenhuma ativação nos últimos ${diasCadastros} dias.`);
+    renderGraficoErro('chart-cadastros-dia', diasCadastros === 'tudo'
+      ? 'Nenhuma ativação registrada.'
+      : `Nenhuma ativação nos últimos ${diasCadastros} dias.`);
     return;
   }
 
   renderGraficoArea('chart-cadastros-dia', {
-    labels: linhas.map(l => formatarRotuloDia(l.dia)),
+    labels: linhas.map(l => granularidade === 'mes'
+      ? formatarRotuloBucket(l.bucket || l.dia, 'mes')
+      : formatarRotuloDia(l.dia)),
     valores: linhas.map(l => l.total),
     cor: '--teal',
     formatarTooltip: formatarTooltipCadastros
@@ -780,7 +795,12 @@ function renderGraficoCadastrosPorDia(linhas) {
 document.querySelectorAll('#cadastros-periodo-seletor button').forEach(btn => {
   btn.addEventListener('click', () => {
     if (btn.classList.contains('active')) return;
-    diasCadastros = Number(btn.dataset.dias);
+    diasCadastros = btn.dataset.dias;
+    try {
+      localStorage.setItem(JANELA_CADASTROS_KEY, diasCadastros);
+    } catch (e) {
+      // sem persistência nesta sessão
+    }
     document.querySelectorAll('#cadastros-periodo-seletor button').forEach(b => {
       b.classList.toggle('active', b === btn);
     });
@@ -834,6 +854,98 @@ function formatarRotuloHora(chaveHora) {
   return chaveHora.slice(11, 16);
 }
 
+// ==========================================================================
+// JANELA DOS GRÁFICOS TÉCNICOS — vale pra aba inteira (3 gráficos de
+// série + barra de status + as duas tabelas de rota). Persistida em
+// localStorage, mesmo padrão do intervalo de auto-refresh.
+//
+// O backend decide a GRANULARIDADE sozinho a partir do tamanho da janela
+// (hora -> dia -> mês, ver resolverJanelaGraficos em admin.js) e devolve
+// qual usou. O front não escolhe nem adivinha: só formata o rótulo do
+// eixo de acordo com o que veio. Por isso o campo do item é `bucket`, e
+// não `hora` — o que cada ponto representa muda com a janela.
+// ==========================================================================
+const JANELA_TECNICOS_KEY = 'nese-graficos-tecnicos-janela';
+
+function obterJanelaTecnicos() {
+  try {
+    return localStorage.getItem(JANELA_TECNICOS_KEY) || '24';
+  } catch (e) {
+    return '24';
+  }
+}
+
+let janelaTecnicos = obterJanelaTecnicos();
+
+// Rótulo de eixo por granularidade: hora -> "14:00"; dia -> "11/08";
+// mês -> "ago/26". Sem isso, uma série mensal mostraria "2026-08" cru.
+function formatarRotuloBucket(bucket, granularidade) {
+  if (granularidade === 'mes') {
+    const [ano, mes] = bucket.split('-');
+    const nomes = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+    return `${nomes[Number(mes) - 1]}/${ano.slice(2)}`;
+  }
+  if (granularidade === 'dia') {
+    const [, mes, dia] = bucket.split('-');
+    return `${dia}/${mes}`;
+  }
+  return formatarRotuloHora(bucket);
+}
+
+// Texto que aparece ao lado de cada título da aba. Mostra a janela E a
+// granularidade porque as duas mudam juntas — "30 dias" sem dizer "por
+// dia" deixaria ambíguo se cada ponto é uma hora ou um dia.
+const ROTULO_GRANULARIDADE = { hora: 'por hora', dia: 'por dia', mes: 'por mês' };
+
+function atualizarRotuloJanelaTecnicos(data) {
+  const gran = ROTULO_GRANULARIDADE[data.granularidade] || '';
+  let janela;
+  if (data.tudo) {
+    // "Tudo" em request_logs é enganoso se dito sem ressalva: a tabela
+    // tem TTL, então o começo da série é o log mais antigo que SOBROU, não
+    // o nascimento do app. Mostrar a data real evita essa leitura errada.
+    const inicio = new Date(data.desde).toLocaleDateString('pt-BR');
+    janela = `todo o histórico disponível, desde ${inicio}`;
+  } else {
+    const horas = data.horas || Number(janelaTecnicos);
+    janela = horas >= 24 ? `últimos ${Math.round(horas / 24)} dia(s)` : `últimas ${horas}h`;
+  }
+  document.querySelectorAll('.janela-tecnicos-rotulo').forEach(el => {
+    el.textContent = `(${janela}, ${gran})`;
+  });
+}
+
+document.querySelectorAll('#tecnicos-periodo-seletor button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.classList.contains('active')) return;
+    janelaTecnicos = btn.dataset.horas;
+    try {
+      localStorage.setItem(JANELA_TECNICOS_KEY, janelaTecnicos);
+    } catch (e) {
+      // sem persistência nesta sessão — vale só até recarregar
+    }
+    document.querySelectorAll('#tecnicos-periodo-seletor button').forEach(b => {
+      b.classList.toggle('active', b === btn);
+    });
+    carregarGraficosTecnicos(getToken());
+  });
+});
+
+// Reflete na UI a janela restaurada do localStorage (o botão "ativo" no
+// HTML é sempre 24h; sem isto, quem escolheu 30d veria 24h marcado e o
+// gráfico de 30d — os dois discordando na tela).
+function initJanelaCadastros() {
+  document.querySelectorAll('#cadastros-periodo-seletor button').forEach(b => {
+    b.classList.toggle('active', b.dataset.dias === diasCadastros);
+  });
+}
+
+function initJanelaTecnicos() {
+  document.querySelectorAll('#tecnicos-periodo-seletor button').forEach(b => {
+    b.classList.toggle('active', b.dataset.horas === janelaTecnicos);
+  });
+}
+
 // rotuloPlural: já vem pronto no plural (evita regra de pluralização
 // genérica errada pra frases tipo "usuário ativo" -> "usuários ativos",
 // onde as DUAS palavras mudam, não só a última).
@@ -841,39 +953,39 @@ function formatarTooltipContagem(rotuloSingular, rotuloPlural) {
   return valor => `${valor} ${valor === 1 ? rotuloSingular : rotuloPlural}`;
 }
 
-function renderGraficoRequestsPorHora(linhas) {
+function renderGraficoRequestsPorHora(linhas, granularidade) {
   if (!linhas || linhas.length === 0) {
-    renderGraficoErro('chart-requests-hora', 'Nenhuma request nas últimas 24h.');
+    renderGraficoErro('chart-requests-hora', 'Nenhuma request no período.');
     return;
   }
   renderGraficoArea('chart-requests-hora', {
-    labels: linhas.map(l => formatarRotuloHora(l.hora)),
+    labels: linhas.map(l => formatarRotuloBucket(l.bucket, granularidade)),
     valores: linhas.map(l => l.total),
     cor: '--blue',
     formatarTooltip: formatarTooltipContagem('request', 'requests')
   });
 }
 
-function renderGraficoErrosPorHora(linhas) {
+function renderGraficoErrosPorHora(linhas, granularidade) {
   if (!linhas || linhas.length === 0) {
-    renderGraficoErro('chart-erros-hora', 'Nenhum erro nas últimas 24h.');
+    renderGraficoErro('chart-erros-hora', 'Nenhum erro no período.');
     return;
   }
   renderGraficoArea('chart-erros-hora', {
-    labels: linhas.map(l => formatarRotuloHora(l.hora)),
+    labels: linhas.map(l => formatarRotuloBucket(l.bucket, granularidade)),
     valores: linhas.map(l => l.total),
     cor: '--red',
     formatarTooltip: formatarTooltipContagem('erro', 'erros')
   });
 }
 
-function renderGraficoUsuariosAtivosPorHora(linhas) {
+function renderGraficoUsuariosAtivosPorHora(linhas, granularidade) {
   if (!linhas || linhas.length === 0) {
-    renderGraficoErro('chart-usuarios-ativos-hora', 'Nenhuma atividade nas últimas 24h.');
+    renderGraficoErro('chart-usuarios-ativos-hora', 'Nenhuma atividade no período.');
     return;
   }
   renderGraficoArea('chart-usuarios-ativos-hora', {
-    labels: linhas.map(l => formatarRotuloHora(l.hora)),
+    labels: linhas.map(l => formatarRotuloBucket(l.bucket, granularidade)),
     valores: linhas.map(l => l.total),
     cor: '--green',
     formatarTooltip: formatarTooltipContagem('usuário ativo', 'usuários ativos')
@@ -945,20 +1057,28 @@ function renderErrosPorRota(porRota) {
 
 async function carregarGraficosTecnicosPrincipais(token) {
   try {
-    const res = await fetch(ENDPOINT_GRAFICOS_TECNICOS, {
+    const res = await fetch(`${ENDPOINT_GRAFICOS_TECNICOS}?horas=${encodeURIComponent(janelaTecnicos)}`, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    renderGraficoRequestsPorHora(data.requestsPorHora);
-    renderGraficoErrosPorHora(data.errosPorHora);
-    renderGraficoUsuariosAtivosPorHora(data.usuariosAtivosPorHora);
-    renderGraficoRequestsPorStatus(data.requestsPorStatusUltimas24h);
+    atualizarRotuloJanelaTecnicos(data);
+    renderGraficoRequestsPorHora(data.requests, data.granularidade);
+    renderGraficoErrosPorHora(data.erros, data.granularidade);
+    renderGraficoUsuariosAtivosPorHora(data.usuariosAtivos, data.granularidade);
+    renderGraficoRequestsPorStatus(data.requestsPorStatus);
     // % do badge em "Erros hoje" (Visão geral) — ver atualizarBadgeErrosHoje.
-    const totalRequests24h = (data.requestsPorHora || []).reduce((soma, l) => soma + l.total, 0);
-    const totalErros24h = (data.errosPorHora || []).reduce((soma, l) => soma + l.total, 0);
-    atualizarBadgeErrosHoje(totalErros24h, totalRequests24h);
+    // Só faz sentido com a janela em 24h: com 30 dias selecionados o badge
+    // viraria "erros do mês" com rótulo de "hoje". Fora disso, esconde.
+    if (janelaTecnicos === '24') {
+      const totalRequests = (data.requests || []).reduce((soma, l) => soma + l.total, 0);
+      const totalErros = (data.erros || []).reduce((soma, l) => soma + l.total, 0);
+      atualizarBadgeErrosHoje(totalErros, totalRequests);
+    } else {
+      const badge = document.getElementById('stat-erros-pct-badge');
+      if (badge) badge.hidden = true;
+    }
   } catch (e) {
     renderGraficoErro('chart-requests-hora', `Erro ao carregar (${e.message}).`);
     renderGraficoErro('chart-erros-hora', `Erro ao carregar (${e.message}).`);
@@ -971,7 +1091,7 @@ async function carregarGraficosTecnicosPrincipais(token) {
 
 async function carregarErrosPorRota(token) {
   try {
-    const res = await fetch(ENDPOINT_ERROS_POR_ROTA, {
+    const res = await fetch(`${ENDPOINT_ERROS_POR_ROTA}?horas=${encodeURIComponent(janelaTecnicos)}`, {
       headers: { 'Accept': 'application/json', 'X-Admin-Token': token }
     });
     if (res.status === 401) throw new Error('token inválido');
@@ -1001,7 +1121,7 @@ async function carregarGraficosComercial(token) {
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    renderGraficoCadastrosPorDia(data.cadastrosPorDia);
+    renderGraficoCadastrosPorDia(data.cadastrosPorDia, data.granularidadeCadastros);
     renderGraficoCadastrosPorHora(data.cadastrosPorHora);
     renderGraficoCategorias(data.prestadoresPorCategoria);
     renderClientesVsPrestadores(data.clientesVsPrestadores);
@@ -1637,7 +1757,7 @@ function renderRotasPopularesErro(mensagem) {
 
 async function carregarRotasPopulares(token) {
   try {
-    const res = await fetch(ENDPOINT_ROTAS_POPULARES, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
+    const res = await fetch(`${ENDPOINT_ROTAS_POPULARES}?horas=${encodeURIComponent(janelaTecnicos)}`, { headers: { 'Accept': 'application/json', 'X-Admin-Token': token } });
     if (res.status === 401) throw new Error('token inválido');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -2598,5 +2718,7 @@ function initAutoRefresh() {
 }
 
 initTheme();
+initJanelaTecnicos();
+initJanelaCadastros();
 initSessao(); // decide sozinho entre mostrar login ou carregar o painel
 initAutoRefresh();
