@@ -810,3 +810,70 @@ a.sidebar-theme-btn { text-decoration: none; }
     padding: 6px 10px;
     word-break: break-word;
   }
+
+/* ==========================================================================
+   CONTAS DE ACESSO — formulários de criar login e trocar senha.
+   ========================================================================== */
+
+.form-conta {
+    max-width: 720px;
+    margin-top: 12px;
+  }
+
+.form-conta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+.form-conta-largo { grid-column: 1 / -1; }
+
+.form-conta label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+.form-conta label span {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+.form-conta input,
+.form-conta select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 5px;
+    width: 100%;
+  }
+
+.form-conta input:focus,
+.form-conta select:focus {
+    outline: none;
+    border-color: var(--gold);
+  }
+
+.form-conta-msg {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--green);
+    padding: 8px 11px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    margin-bottom: 12px;
+  }
+
+.form-conta-msg[hidden] { display: none; }
+
+.form-conta-msg-erro {
+    background: rgba(217, 100, 90, 0.1);
+    border-color: rgba(217, 100, 90, 0.3);
+    color: var(--red);
+  }
