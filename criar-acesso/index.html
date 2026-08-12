@@ -86,20 +86,26 @@
           <textarea id="r-ips" rows="2" spellcheck="false" placeholder="168.90.91.0/24"></textarea>
         </label>
 
+        <!-- Os <option> destes três seletores são montados por JS a
+             partir do que GET /bootstrap/status devolve (ver
+             utils/opcoesRestricao.js no backend). Ficam vazios aqui de
+             propósito: escrever a lista no HTML criaria uma segunda
+             fonte, livre pra divergir da que o servidor valida. -->
         <label>
-          <span>Janela de horário (HH:MM-HH:MM)</span>
-          <input type="text" id="r-horario" placeholder="08:00-18:00" autocomplete="off">
+          <span>Janela de horário</span>
+          <select id="r-horario"></select>
         </label>
 
         <label>
           <span>Fuso horário</span>
-          <input type="text" id="r-fuso" value="America/Fortaleza" autocomplete="off">
+          <select id="r-fuso"></select>
         </label>
 
         <label class="largo">
-          <span>Países permitidos (um por linha; vazio = qualquer)</span>
-          <textarea id="r-paises" rows="2" spellcheck="false" placeholder="Brazil"></textarea>
+          <span>País permitido</span>
+          <select id="r-paises"></select>
         </label>
+
       </div>
     </fieldset>
 
