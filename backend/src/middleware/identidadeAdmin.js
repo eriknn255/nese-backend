@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const db = require("../db");
+const { avaliarRestricoes } = require("../utils/restricoesLogin");
 
 // ==========================================================================
 // LOGIN INTERNO — dashboard e moderação. Duas coisas propositalmente
@@ -41,7 +42,7 @@ function identificarAdmin(req, res, next) {
 
     try {
         const payload = jwt.verify(token, ADMIN_SESSION_SECRET);
-        const admin = db.prepare("SELECT id, email, nome, nivel, senha_alterada_em FROM admins WHERE id = ?").get(payload.sub);
+        const admin = db.prepare("SELECT * FROM admins WHERE id = ?").get(payload.sub);
 
         // Sessão emitida ANTES da última troca de senha morre agora. É o
         // que faz "trocar a senha" expulsar quem estava dentro — sem
@@ -63,6 +64,24 @@ function identificarAdmin(req, res, next) {
         if (admin && admin.senha_alterada_em && (payload.iat || 0) < alteradaEmSegundos) {
             req.admin = null;
             return next();
+        }
+
+        // Restrições do PRÓPRIO login (IP e janela de horário — ver
+        // utils/restricoesLogin.js). Avaliadas aqui, a cada requisição, e
+        // não só no POST /login: quem entrasse às 17:59 usaria o painel a
+        // madrugada inteira se a checagem fosse só na porta, o que
+        // esvaziaria o sentido de configurar janela.
+        //
+        // Reprova = req.admin fica null, então exigirNivel responde 401 e
+        // o front devolve a pessoa pra tela de login — mesmo caminho de
+        // sessão expirada, sem precisar de tratamento especial.
+        if (admin) {
+            const restricao = avaliarRestricoes(admin, req.ip);
+            if (!restricao.permitido) {
+                console.warn(`[sessao] recusada email=${admin.email} ip=${req.ip} — ${restricao.motivo}`);
+                req.admin = null;
+                return next();
+            }
         }
 
         req.admin = admin || null;
