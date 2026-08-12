@@ -54,6 +54,9 @@
     <button type="button" class="sidebar-link" data-aba="log" title="Log de auditoria">
       <span class="sidebar-icon"></span> <span class="sidebar-link-label">Log de auditoria</span>
     </button>
+    <button type="button" class="sidebar-link" data-aba="contas" title="Contas de acesso">
+      <span class="sidebar-icon"></span> <span class="sidebar-link-label">Contas de acesso</span>
+    </button>
 
     <div class="sidebar-spacer"></div>
     <div class="admin-identidade" id="admin-identidade"></div>
@@ -144,6 +147,77 @@
           <tr><td colspan="5" class="empty-state">carregando…</td></tr>
         </tbody>
       </table>
+    </section>
+
+    <!-- ==================== ABA: CONTAS DE ACESSO ==================== -->
+    <section class="aba-conteudo" id="aba-contas" hidden>
+      <div class="section-title">Contas de acesso <span class="section-note">(logins do dashboard e da moderação)</span></div>
+      <table>
+        <thead>
+          <tr>
+            <th>Nome</th>
+            <th>E-mail</th>
+            <th>Nível</th>
+            <th>Criado em</th>
+            <th>Criado por</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="contas-tbody">
+          <tr><td colspan="6" class="empty-state">carregando…</td></tr>
+        </tbody>
+      </table>
+
+      <!-- Criar login exige o ADMIN_TOKEN do servidor, NÃO a sessão atual
+           (ver POST /contas em admin.js). Por isso o campo do token aqui:
+           nem um 'full' logado cria acesso sem o segredo. Ele não fica
+           salvo em lugar nenhum — some ao recarregar a página. -->
+      <div class="section-title" style="margin-top:32px;">Criar novo login</div>
+      <form class="form-conta" id="form-nova-conta">
+        <div class="form-conta-grid">
+          <label>
+            <span>Nome</span>
+            <input type="text" id="nova-conta-nome" required>
+          </label>
+          <label>
+            <span>E-mail</span>
+            <input type="email" id="nova-conta-email" autocomplete="off" required>
+          </label>
+          <label>
+            <span>Senha (mín. 10)</span>
+            <input type="password" id="nova-conta-senha" autocomplete="new-password" minlength="10" required>
+          </label>
+          <label>
+            <span>Nível</span>
+            <select id="nova-conta-nivel">
+              <option value="ver">ver — só dashboard</option>
+              <option value="full">full — dashboard + moderação</option>
+            </select>
+          </label>
+          <label class="form-conta-largo">
+            <span>Token de admin do servidor (ADMIN_TOKEN)</span>
+            <input type="password" id="nova-conta-token" autocomplete="off" placeholder="Não fica salvo — some ao recarregar" required>
+          </label>
+        </div>
+        <div class="form-conta-msg" id="nova-conta-msg" hidden></div>
+        <button type="submit" class="toolbar-btn" id="nova-conta-btn">Criar login</button>
+      </form>
+
+      <div class="section-title" style="margin-top:32px;">Trocar minha senha</div>
+      <form class="form-conta" id="form-trocar-senha">
+        <div class="form-conta-grid">
+          <label>
+            <span>Senha atual</span>
+            <input type="password" id="senha-atual" autocomplete="current-password" required>
+          </label>
+          <label>
+            <span>Nova senha (mín. 10)</span>
+            <input type="password" id="senha-nova" autocomplete="new-password" minlength="10" required>
+          </label>
+        </div>
+        <div class="form-conta-msg" id="trocar-senha-msg" hidden></div>
+        <button type="submit" class="toolbar-btn" id="trocar-senha-btn">Trocar senha</button>
+      </form>
     </section>
 
   </div>
