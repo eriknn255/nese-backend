@@ -333,8 +333,31 @@ db.exec("CREATE INDEX IF NOT EXISTS idx_bloqueios_login_ate ON bloqueios_login(a
 //
 // DEFAULT 0 nas linhas antigas = "nunca trocou", então nenhuma sessão
 // existente cai na migração.
+// ==========================================================================
+// RESTRIÇÕES POR LOGIN — cada credencial de funcionário carrega DE ONDE e
+// QUANDO pode ser usada. São independentes das regras que guardam a
+// página criar-acesso/ (essas continuam em config/acesso.json + .env, e
+// valem só pro admin dono do ADMIN_TOKEN).
+//
+// Guardadas como texto separado por vírgula, não JSON: são listas curtas
+// e planas, e texto simples deixa a coluna legível num SELECT manual —
+// que é como se diagnostica "por que fulano não entra?" às pressas.
+//
+// Vazio significa "sem restrição", mas criar login assim é bloqueado na
+// rota (ver POST/PUT /contas): a coluna aceita vazio só pra migração das
+// linhas que já existiam antes desta regra.
+// ==========================================================================
 const colunasAdmins = db.prepare("PRAGMA table_info(admins)").all();
-if (colunasAdmins.length > 0 && !colunasAdmins.some(c => c.name === "senha_alterada_em")) {
+if (colunasAdmins.length > 0 && !colunasAdmins.some(c => c.name === "ips")) {
+    db.exec("ALTER TABLE admins ADD COLUMN ips TEXT NOT NULL DEFAULT ''");
+    db.exec("ALTER TABLE admins ADD COLUMN horario TEXT NOT NULL DEFAULT ''");
+    db.exec("ALTER TABLE admins ADD COLUMN fuso_horario TEXT NOT NULL DEFAULT ''");
+    db.exec("ALTER TABLE admins ADD COLUMN paises TEXT NOT NULL DEFAULT ''");
+    console.log("[db] migração aplicada: admins.ips/horario/fuso_horario/paises");
+}
+
+const colunasAdminsSenha = db.prepare("PRAGMA table_info(admins)").all();
+if (colunasAdminsSenha.length > 0 && !colunasAdminsSenha.some(c => c.name === "senha_alterada_em")) {
     db.exec("ALTER TABLE admins ADD COLUMN senha_alterada_em INTEGER NOT NULL DEFAULT 0");
     console.log("[db] migração aplicada: admins.senha_alterada_em");
 }
