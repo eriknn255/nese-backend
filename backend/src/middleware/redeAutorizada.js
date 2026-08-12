@@ -236,4 +236,19 @@ function exigirRedeAutorizada(req, res, next) {
     });
 }
 
-module.exports = { exigirRedeAutorizada, avaliarAcesso, MENSAGEM_GENERICA };
+// Só a checagem de IP, SEM horário nem país. Existe separado de
+// avaliarAcesso de propósito: quem consome isto (ver middleware/
+// limiteLogin.js) quer saber "esse endereço é de casa?", não "pode criar
+// login agora?". São perguntas diferentes.
+//
+// Misturar as duas foi um bug real: a isenção do limite de login usava
+// avaliarAcesso, então às 21:01 — janela de bootstrap fechada — o IP do
+// dono deixava de ser isento e ele podia se trancar do próprio painel
+// justamente fora do horário comercial, que é quando mais se mexe.
+// Horário e país restringem CRIAR credencial; não têm nada a dizer sobre
+// em quem confiar pra contagem de tentativas.
+function ipNaAllowlist(req) {
+    return ipAutorizado(req.ip);
+}
+
+module.exports = { exigirRedeAutorizada, avaliarAcesso, ipNaAllowlist, MENSAGEM_GENERICA };
