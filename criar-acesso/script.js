@@ -2,15 +2,37 @@ const BASE_API = 'https://nese-be.ruexinternet.com/api/admin';
 const ENDPOINT_STATUS = `${BASE_API}/bootstrap/status`;
 const ENDPOINT_CONTAS = `${BASE_API}/contas`;
 
+// Bloqueado = a página se apaga e vira um 404. Não mostra caixa, aviso
+// nem título: qualquer texto próprio já confirmaria que existe ALGO aqui.
+//
+// LIMITE HONESTO DISTO: o arquivo é estático servido pelo Nginx, então o
+// navegador JÁ recebeu 200 + HTML antes deste código rodar. O que se
+// troca é só o que aparece na tela — na aba Network continua 200. Pra um
+// 404 de verdade, o HTML precisaria ser servido pelo Node atrás do mesmo
+// middleware que guarda POST /contas.
+//
+// Na prática isso cobre o visitante casual e o robô de varredura, que
+// leem a página renderizada. Não engana quem inspeciona a resposta.
+//
+// A marcação replica a página de erro padrão do Nginx de propósito: um
+// 404 "estilizado" chamaria mais atenção do que o genérico.
 function mostrarBloqueio() {
-  document.getElementById('status-verificando').hidden = true;
-  document.getElementById('form').hidden = true;
-  document.getElementById('status-bloqueado').hidden = false;
+  document.title = '404 Not Found';
+  document.documentElement.innerHTML =
+    '<head><title>404 Not Found</title></head>' +
+    '<body style="background:#fff;color:#000;font-family:sans-serif;margin:0">' +
+    '<center><h1>404 Not Found</h1></center><hr><center>nginx</center>' +
+    '</body>';
 }
 
 function mostrarFormulario() {
+  // Só aqui a página se revela: caixa, título, tema e formulário saem do
+  // hidden. Antes disso o documento é uma tela vazia — quem não passa na
+  // verificação nunca vê nenhum deles.
+  document.getElementById('caixa').hidden = false;
+  document.getElementById('theme-btn').hidden = false;
   document.getElementById('status-verificando').hidden = true;
-  document.getElementById('status-bloqueado').hidden = true;
+  document.getElementById('titulo').hidden = false;
   document.getElementById('form').hidden = false;
 }
 
