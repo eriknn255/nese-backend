@@ -1,21 +1,33 @@
+// ==========================================================================
+// ADMINISTRAÇÃO DE LOGINS INTERNOS (ver comentário em index.html).
+//
+// Fluxo: token + e-mail -> consulta se a conta existe -> os botões
+// disponíveis mudam conforme a resposta. Nenhum botão de ação aparece
+// antes da consulta, de propósito: "Salvar" sem saber se a conta existe
+// seria ambíguo, e o admin poderia sobrescrever alguém achando que
+// estava criando.
+//
+// Nada aqui protege nada: todas as rotas exigem ADMIN_TOKEN + IP na
+// allowlist no servidor. Esconder botão é conveniência de UX.
+// ==========================================================================
+
 const BASE_API = 'https://nese-be.ruexinternet.com/api/admin';
 const ENDPOINT_STATUS = `${BASE_API}/bootstrap/status`;
 const ENDPOINT_CONTAS = `${BASE_API}/contas`;
+const ENDPOINT_CONSULTA = `${BASE_API}/contas/consulta`;
+const ENDPOINT_REMOVER = `${BASE_API}/contas/remover`;
+
+// null = ainda não consultado; true/false = resultado da última consulta.
+// Zerado sempre que token ou e-mail mudam, senão os botões continuariam
+// refletindo uma consulta de outro e-mail.
+let contaExiste = null;
 
 // Bloqueado = a página se apaga e vira um 404. Não mostra caixa, aviso
 // nem título: qualquer texto próprio já confirmaria que existe ALGO aqui.
 //
 // LIMITE HONESTO DISTO: o arquivo é estático servido pelo Nginx, então o
 // navegador JÁ recebeu 200 + HTML antes deste código rodar. O que se
-// troca é só o que aparece na tela — na aba Network continua 200. Pra um
-// 404 de verdade, o HTML precisaria ser servido pelo Node atrás do mesmo
-// middleware que guarda POST /contas.
-//
-// Na prática isso cobre o visitante casual e o robô de varredura, que
-// leem a página renderizada. Não engana quem inspeciona a resposta.
-//
-// A marcação replica a página de erro padrão do Nginx de propósito: um
-// 404 "estilizado" chamaria mais atenção do que o genérico.
+// troca é só o que aparece na tela — na aba Network continua 200.
 function mostrarBloqueio() {
   document.title = '404 Not Found';
   document.documentElement.innerHTML =
@@ -26,9 +38,6 @@ function mostrarBloqueio() {
 }
 
 function mostrarFormulario() {
-  // Só aqui a página se revela: caixa, título, tema e formulário saem do
-  // hidden. Antes disso o documento é uma tela vazia — quem não passa na
-  // verificação nunca vê nenhum deles.
   document.getElementById('caixa').hidden = false;
   document.getElementById('theme-btn').hidden = false;
   document.getElementById('status-verificando').hidden = true;
@@ -43,49 +52,172 @@ function mostrarMensagem(texto, ehErro) {
   el.hidden = false;
 }
 
+function limparMensagem() {
+  document.getElementById('msg').hidden = true;
+}
+
+// Reflete na UI o resultado da consulta. `existe` null volta ao estado
+// inicial (só "Verificar e-mail").
+function aplicarEstadoConsulta(existe, conta) {
+  contaExiste = existe;
+  const box = document.getElementById('consulta');
+
+  document.getElementById('btn-verificar').hidden = existe !== null;
+  // Fora da janela de horário o botão de criar aparece desabilitado e
+  // explica o porquê. Aqui, ao contrário da tela de bloqueio, o silêncio
+  // não ajuda: quem chegou até aqui já provou ter IP e token, e um botão
+  // que falha sem dizer nada só gera dúvida sobre o sistema estar quebrado.
+  const btnCriar = document.getElementById('btn-criar');
+  btnCriar.hidden = existe !== false;
+  btnCriar.disabled = !podeCriarConta;
+  btnCriar.title = podeCriarConta ? '' : 'Criar login só é permitido dentro da janela de horário configurada.';
+  document.getElementById('btn-salvar').hidden = existe !== true;
+  document.getElementById('btn-apagar').hidden = existe !== true;
+
+  if (existe === null) {
+    box.hidden = true;
+    return;
+  }
+
+  box.hidden = false;
+  box.classList.toggle('consulta-existe', existe);
+  if (existe) {
+    box.textContent = `Já existe login para este e-mail. Salvar vai SOBRESCREVER nome, senha e nível — e derrubar as sessões abertas dessa pessoa.`;
+    // Preenche com o que está valendo hoje: sem isso o formulário
+    // começaria em branco e seria fácil trocar o nível de alguém sem
+    // perceber. A senha não vem (só existe hash no servidor), então
+    // sobrescrever SEMPRE define senha nova — é o comportamento honesto,
+    // já que não há como "manter a atual" sem conhecê-la.
+    if (conta) {
+      document.getElementById('nome').value = conta.nome || '';
+      document.getElementById('nivel').value = conta.nivel || 'ver';
+    }
+  } else {
+    box.textContent = podeCriarConta
+      ? 'Nenhum login para este e-mail. Salvar vai criar uma conta nova.'
+      : 'Nenhum login para este e-mail. Criar conta só é permitido dentro da janela de horário configurada.';
+  }
+}
+
+// Qualquer mudança em token ou e-mail invalida a consulta anterior.
+['token', 'email'].forEach(id => {
+  document.getElementById(id).addEventListener('input', () => {
+    if (contaExiste !== null) aplicarEstadoConsulta(null, null);
+    limparMensagem();
+  });
+});
+
+// Resposta genérica do portão de rede (ver MENSAGEM_GENERICA no backend).
+// Precisa ser distinguida do 404 legítimo de "esse e-mail não tem login":
+// os dois usam 404, mas um significa "você não deveria estar aqui" e o
+// outro é resultado normal de uma consulta.
+const MSG_PORTAO = 'Não foi possível concluir a operação.';
+
+async function chamar(url, corpo, metodo) {
+  const res = await fetch(url, {
+    method: metodo || 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Admin-Token': document.getElementById('token').value.trim()
+    },
+    body: JSON.stringify(corpo)
+  });
+
+  const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
+
+  // Portão de rede recusou (IP saiu da allowlist, config mudou): a página
+  // inteira vira 404, coerente com o estado inicial. Retorna undefined
+  // pra quem chamou parar sem tentar usar resposta nenhuma.
+  if (res.status === 404 && data.erro === MSG_PORTAO) {
+    mostrarBloqueio();
+    return undefined;
+  }
+
+  if (!res.ok) throw new Error(data.erro || `Falha (HTTP ${res.status}).`);
+  return data;
+}
+
+function dadosFormulario() {
+  return {
+    email: document.getElementById('email').value.trim(),
+    nome: document.getElementById('nome').value.trim(),
+    senha: document.getElementById('senha').value,
+    nivel: document.getElementById('nivel').value
+  };
+}
+
+async function comBotao(id, acao) {
+  const btn = document.getElementById(id);
+  const rotulo = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Aguarde…';
+  try {
+    await acao();
+  } catch (e) {
+    mostrarMensagem(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = rotulo;
+  }
+}
+
+document.getElementById('btn-verificar').addEventListener('click', () => comBotao('btn-verificar', async () => {
+  limparMensagem();
+  const email = document.getElementById('email').value.trim();
+  if (!email) return mostrarMensagem('Informe o e-mail.', true);
+
+  const data = await chamar(ENDPOINT_CONSULTA, { email });
+  if (data) aplicarEstadoConsulta(Boolean(data.existe), data.conta);
+}));
+
+document.getElementById('btn-criar').addEventListener('click', () => comBotao('btn-criar', async () => {
+  limparMensagem();
+  const data = await chamar(ENDPOINT_CONTAS, dadosFormulario());
+  if (!data) return;
+  mostrarMensagem(`Login "${data.email}" criado como ${data.nivel}.`, false);
+  document.getElementById('form').reset();
+  aplicarEstadoConsulta(null, null);
+}));
+
+document.getElementById('btn-salvar').addEventListener('click', () => comBotao('btn-salvar', async () => {
+  limparMensagem();
+  const dados = dadosFormulario();
+  if (!confirm(`Sobrescrever as credenciais de ${dados.email}? As sessões abertas dessa pessoa serão encerradas.`)) return;
+
+  const data = await chamar(ENDPOINT_CONTAS, dados, 'PUT');
+  if (!data) return;
+  mostrarMensagem(`Credenciais de "${data.email}" atualizadas (${data.nivel}). Sessões abertas encerradas.`, false);
+  document.getElementById('senha').value = '';
+}));
+
+document.getElementById('btn-apagar').addEventListener('click', () => comBotao('btn-apagar', async () => {
+  limparMensagem();
+  const email = document.getElementById('email').value.trim();
+  if (!confirm(`Apagar para sempre o login de ${email}? Não dá pra desfazer.`)) return;
+
+  const data = await chamar(ENDPOINT_REMOVER, { email });
+  if (data === undefined) return;
+  mostrarMensagem(`Login de "${email}" apagado.`, false);
+  document.getElementById('form').reset();
+  aplicarEstadoConsulta(null, null);
+}));
+
+// `permitido` (só IP) libera a PÁGINA; `podeCriar` (IP + horário + país)
+// libera só a criação. É o que permite apagar/sobrescrever fora de hora
+// sem afrouxar a regra de conceder acesso novo.
+let podeCriarConta = false;
+
 async function verificarRede() {
   try {
     const res = await fetch(ENDPOINT_STATUS);
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.permitido) return mostrarBloqueio();
+    podeCriarConta = data.podeCriar === true;
     mostrarFormulario();
   } catch (e) {
     mostrarBloqueio();
   }
 }
-
-document.getElementById('form').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const btn = document.getElementById('btn');
-  btn.disabled = true;
-
-  try {
-    const res = await fetch(ENDPOINT_CONTAS, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Admin-Token': document.getElementById('token').value.trim()
-      },
-      body: JSON.stringify({
-        nome: document.getElementById('nome').value.trim(),
-        email: document.getElementById('email').value.trim(),
-        senha: document.getElementById('senha').value,
-        nivel: document.getElementById('nivel').value
-      })
-    });
-    const data = await res.json().catch(() => ({}));
-
-    if (res.status === 404) return mostrarBloqueio();
-    if (!res.ok) throw new Error(data.erro || `HTTP ${res.status}`);
-
-    mostrarMensagem('OK', false);
-    document.getElementById('form').reset();
-  } catch (e) {
-    mostrarMensagem(e.message, true);
-  } finally {
-    btn.disabled = false;
-  }
-});
 
 const THEME_KEY = '_t';
 
