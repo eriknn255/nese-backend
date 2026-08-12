@@ -37,13 +37,54 @@ body {
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
+/* 640px + duas colunas em vez de 400px numa coluna só: com os campos de
+   restrição o formulário passou de 10 campos e a caixa virou uma tira
+   vertical alta demais pra caber na tela sem rolagem. Em duas colunas ela
+   volta a ficar aproximadamente quadrada. */
 .caixa {
   width: 100%;
-  max-width: 400px;
+  max-width: 640px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 32px 28px;
+  padding: 32px 30px;
+}
+
+/* Campos lado a lado. Os que precisam de largura inteira (mensagens,
+   botões, o fieldset de restrições) recebem .largo. */
+#form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 18px;
+}
+
+#form > label { min-width: 0; }
+
+#form > .largo,
+#form > fieldset,
+#form > .msg,
+#form > .consulta,
+#form > button {
+  grid-column: 1 / -1;
+}
+
+/* Dentro do fieldset, mesma ideia: horário e fuso são curtos e ficam
+   lado a lado; IPs e países ocupam a linha toda por serem textarea. */
+.restricoes-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 18px;
+}
+
+.restricoes-grid > .largo { grid-column: 1 / -1; }
+
+/* Uma coluna quando não cabe: abaixo disso duas colunas espremeriam os
+   campos a ponto de o placeholder não caber. */
+@media (max-width: 560px) {
+  #form,
+  .restricoes-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .logo-img {
