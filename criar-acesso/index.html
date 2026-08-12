@@ -34,12 +34,12 @@
   <div class="status" id="status-verificando"></div>
 
   <form id="form" hidden>
-    <label>
+    <label class="largo">
       <span>Token de admin</span>
       <input type="password" id="token" autocomplete="off" required>
     </label>
 
-    <label>
+    <label class="largo">
       <span>E-mail do funcionário</span>
       <input type="email" id="email" autocomplete="off" required>
     </label>
@@ -80,25 +80,27 @@
     <fieldset class="restricoes">
       <legend>Restrições de uso deste login</legend>
 
-      <label>
-        <span>IPs autorizados (um por linha; aceita CIDR)</span>
-        <textarea id="r-ips" rows="2" spellcheck="false" placeholder="168.90.91.0/24"></textarea>
-      </label>
+      <div class="restricoes-grid">
+        <label class="largo">
+          <span>IPs autorizados (um por linha; aceita CIDR)</span>
+          <textarea id="r-ips" rows="2" spellcheck="false" placeholder="168.90.91.0/24"></textarea>
+        </label>
 
-      <label>
-        <span>Janela de horário (HH:MM-HH:MM)</span>
-        <input type="text" id="r-horario" placeholder="08:00-18:00" autocomplete="off">
-      </label>
+        <label>
+          <span>Janela de horário (HH:MM-HH:MM)</span>
+          <input type="text" id="r-horario" placeholder="08:00-18:00" autocomplete="off">
+        </label>
 
-      <label>
-        <span>Fuso horário</span>
-        <input type="text" id="r-fuso" value="America/Fortaleza" autocomplete="off">
-      </label>
+        <label>
+          <span>Fuso horário</span>
+          <input type="text" id="r-fuso" value="America/Fortaleza" autocomplete="off">
+        </label>
 
-      <label>
-        <span>Países permitidos (um por linha; vazio = qualquer)</span>
-        <textarea id="r-paises" rows="2" spellcheck="false" placeholder="Brazil"></textarea>
-      </label>
+        <label class="largo">
+          <span>Países permitidos (um por linha; vazio = qualquer)</span>
+          <textarea id="r-paises" rows="2" spellcheck="false" placeholder="Brazil"></textarea>
+        </label>
+      </div>
     </fieldset>
 
     <div class="msg" id="msg" hidden></div>
