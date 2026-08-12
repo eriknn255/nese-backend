@@ -9,14 +9,13 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/google-sans-flex/wght.css">
 </head>
 <body>
-<button id="theme-btn" type="button" aria-label="Alternar tema">
+<button id="theme-btn" type="button" aria-label="Alternar tema" hidden>
   <span id="theme-icon">🌙</span><span id="theme-label"></span>
 </button>
-<main class="caixa">
+<main class="caixa" id="caixa" hidden>
   <img src="/dashboard/img/logo-nese.webp" class="logo-img" alt="" width="44" height="44">
-  <h1>Criar acesso</h1>
+  <h1 id="titulo" hidden>Criar acesso</h1>
   <div class="status" id="status-verificando"></div>
-  <div class="status" id="status-bloqueado" hidden></div>
   <form id="form" hidden>
     <label>
       <span>Token</span>
