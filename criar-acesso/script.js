@@ -94,10 +94,7 @@ function aplicarEstadoConsulta(existe, conta) {
       // Restrições atuais também: sem isso, sobrescrever começaria com os
       // campos em branco e o servidor recusaria — ou pior, o admin
       // digitaria de novo e trocaria sem querer o que já valia.
-      document.getElementById('r-ips').value = (conta.ips || '').split(',').filter(Boolean).join('\n');
-      document.getElementById('r-horario').value = conta.horario || '';
-      document.getElementById('r-fuso').value = conta.fusoHorario || '';
-      document.getElementById('r-paises').value = (conta.paises || '').split(',').filter(Boolean).join('\n');
+      preencherRestricoes(conta);
     }
   } else {
     box.textContent = podeCriarConta
@@ -148,7 +145,33 @@ function linhasPara(valor) {
   return String(valor || '').split('\n').map(x => x.trim()).filter(Boolean);
 }
 
+// Monta os <option> a partir do que o servidor mandou (GET
+// /bootstrap/status). Fonte única: é a MESMA lista que ele usa pra
+// validar (utils/opcoesRestricao.js). Antes as opções viviam escritas à
+// mão no HTML e o servidor aceitava qualquer valor no formato certo —
+// duas listas livres pra divergir em silêncio.
+function montarSeletor(id, opcoes) {
+  const el = document.getElementById(id);
+  el.innerHTML = '';
+  (opcoes || []).forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o.valor;
+    opt.textContent = o.rotulo;
+    el.appendChild(opt);
+  });
+}
+
+function montarSeletoresRestricao(opcoes) {
+  if (!opcoes) return;
+  montarSeletor('r-horario', opcoes.horarios);
+  montarSeletor('r-fuso', opcoes.fusos);
+  montarSeletor('r-paises', opcoes.paises);
+  const horario = document.getElementById('r-horario');
+  if ([...horario.options].some(o => o.value === '08:00-18:00')) horario.value = '08:00-18:00';
+}
+
 function dadosFormulario() {
+  const pais = document.getElementById('r-paises').value;
   return {
     email: document.getElementById('email').value.trim(),
     nome: document.getElementById('nome').value.trim(),
@@ -156,10 +179,28 @@ function dadosFormulario() {
     nivel: document.getElementById('nivel').value,
     // Restrições DESTE login — obrigatórias no servidor (IP e horário).
     ips: linhasPara(document.getElementById('r-ips').value),
-    horario: document.getElementById('r-horario').value.trim(),
-    fusoHorario: document.getElementById('r-fuso').value.trim(),
-    paises: linhasPara(document.getElementById('r-paises').value)
+    horario: document.getElementById('r-horario').value,
+    fusoHorario: document.getElementById('r-fuso').value,
+    // O backend espera lista; o seletor é de escolha única, então vira
+    // array de 0 ou 1 item. Vazio = sem restrição de país.
+    paises: pais ? [pais] : []
   };
+}
+
+// Repõe nos seletores o que já está gravado. Não existe fallback pra
+// valor fora da lista porque isso deixou de ser possível: o backend só
+// aceita opções do menu (ver lerRestricoes em admin.js).
+function preencherRestricoes(conta) {
+  document.getElementById('r-ips').value = (conta.ips || '').split(',').filter(Boolean).join('\n');
+
+  const definir = (id, valor) => {
+    const el = document.getElementById(id);
+    if ([...el.options].some(o => o.value === valor)) el.value = valor;
+  };
+
+  definir('r-horario', conta.horario || '');
+  definir('r-fuso', conta.fusoHorario || '');
+  definir('r-paises', (conta.paises || '').split(',').filter(Boolean)[0] || '');
 }
 
 async function comBotao(id, acao) {
@@ -231,6 +272,7 @@ async function verificarRede() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.permitido) return mostrarBloqueio();
     podeCriarConta = data.podeCriar === true;
+    montarSeletoresRestricao(data.opcoes);
     mostrarFormulario();
   } catch (e) {
     mostrarBloqueio();
