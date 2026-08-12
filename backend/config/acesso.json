@@ -15,7 +15,7 @@
     "Ver backend/src/middleware/redeAutorizada.js."
   ],
   "ips": [
-    "168.90.91.170/32"
+    "168.90.91.172/32"
   ],
   "horario": "00:00-23:59",
   "fusoHorario": "America/Fortaleza",
