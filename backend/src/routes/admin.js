@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require("uuid");
 const db = require("../db");
 const { exigirNivel } = require("../middleware/identidadeAdmin");
 const { exigirRedeAutorizada, avaliarAcesso, ipNaAllowlist, MENSAGEM_GENERICA } = require("../middleware/redeAutorizada");
+const { avaliarRestricoes, paisPermitido, listaDe } = require("../utils/restricoesLogin");
 const { hashSenha, verificarSenha, gastarTempoEquivalente } = require("../utils/senha");
 const {
     verificarLimiteLogin, registrarFalhaLogin, registrarSucessoLogin,
@@ -107,6 +108,44 @@ function exigirAdminComLimite(req, res, next) {
 // o segredo e reconfigurar todo mundo.
 // ==========================================================================
 
+// ==========================================================================
+// RESTRIÇÕES DE UM LOGIN (de onde/quando ele pode ser usado). Validadas
+// aqui e gravadas nas colunas ips/horario/fuso_horario/paises de `admins`.
+//
+// IP e horário são OBRIGATÓRIOS: não existe criar login "aberto". A conta
+// é da empresa e o acesso ao painel é privilegiado — deixar o campo em
+// branco por pressa produziria exatamente a credencial que ninguém
+// lembra de restringir depois. País segue opcional porque geo-IP é
+// palpite (VPN, CGNAT e IP roteado por outro estado erram), e exigir uma
+// camada não confiável só geraria bloqueio inexplicável.
+// ==========================================================================
+function lerRestricoes(corpo) {
+    const ips = Array.isArray(corpo.ips) ? corpo.ips.map(x => String(x).trim()).filter(Boolean) : listaDe(corpo.ips);
+    const paises = Array.isArray(corpo.paises) ? corpo.paises.map(x => String(x).trim()).filter(Boolean) : listaDe(corpo.paises);
+    const horario = String(corpo.horario || "").trim();
+    const fusoHorario = String(corpo.fusoHorario || "").trim();
+
+    if (ips.length === 0) {
+        return { erro: "Informe ao menos um IP autorizado para este login." };
+    }
+    if (!horario) {
+        return { erro: "Informe a janela de horário deste login (formato HH:MM-HH:MM)." };
+    }
+    if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(horario)) {
+        return { erro: "Horário deve estar no formato HH:MM-HH:MM." };
+    }
+    if (!fusoHorario) {
+        return { erro: "Informe o fuso horário — sem ele a janela seria interpretada no fuso do servidor (UTC), deslocando o horário sem aviso." };
+    }
+    try {
+        new Intl.DateTimeFormat("pt-BR", { timeZone: fusoHorario }).format(new Date());
+    } catch (erro) {
+        return { erro: `Fuso horário inválido: ${fusoHorario}` };
+    }
+
+    return { ips: ips.join(","), horario, fusoHorario, paises: paises.join(",") };
+}
+
 const EXPIRACAO_SESSAO_ADMIN = "12h";
 
 function assinarSessaoAdmin(admin) {
@@ -179,6 +218,9 @@ router.post("/contas", exigirRedeAutorizada, exigirAdminComLimite, async (req, r
     const jaExiste = db.prepare("SELECT id FROM admins WHERE email = ?").get(email);
     if (jaExiste) return res.status(409).json({ erro: "Já existe um login com esse e-mail." });
 
+    const restricoes = lerRestricoes(req.body);
+    if (restricoes.erro) return res.status(400).json({ erro: restricoes.erro });
+
     const conta = {
         id: uuidv4(),
         email,
@@ -189,15 +231,22 @@ router.post("/contas", exigirRedeAutorizada, exigirAdminComLimite, async (req, r
         // Se quem criou já estava logado, guarda o e-mail dele; se veio só
         // com o ADMIN_TOKEN puro (caso normal da primeira conta), fica
         // 'ADMIN_TOKEN' mesmo — é a verdade do que aconteceu.
-        criado_por: req.admin ? req.admin.email : "ADMIN_TOKEN"
+        criado_por: req.admin ? req.admin.email : "ADMIN_TOKEN",
+        ips: restricoes.ips,
+        horario: restricoes.horario,
+        fuso_horario: restricoes.fusoHorario,
+        paises: restricoes.paises
     };
 
     db.prepare(`
-        INSERT INTO admins (id, email, nome, senha_hash, nivel, criado_em, criado_por)
-        VALUES (@id, @email, @nome, @senha_hash, @nivel, @criado_em, @criado_por)
+        INSERT INTO admins (id, email, nome, senha_hash, nivel, criado_em, criado_por, ips, horario, fuso_horario, paises)
+        VALUES (@id, @email, @nome, @senha_hash, @nivel, @criado_em, @criado_por, @ips, @horario, @fuso_horario, @paises)
     `).run(conta);
 
-    res.status(201).json({ id: conta.id, email: conta.email, nome: conta.nome, nivel: conta.nivel, criadoEm: conta.criado_em });
+    res.status(201).json({
+        id: conta.id, email: conta.email, nome: conta.nome, nivel: conta.nivel, criadoEm: conta.criado_em,
+        ips: restricoes.ips, horario: restricoes.horario, fusoHorario: restricoes.fusoHorario, paises: restricoes.paises
+    });
 });
 
 // POST /api/admin/login — email+senha, devolve o JWT de sessão. NÃO passa
@@ -235,6 +284,25 @@ router.post("/login", async (req, res) => {
 
     if (!conta || !senhaOk) {
         registrarFalhaLogin({ email, ip: limite.ip, contaExiste: Boolean(conta) });
+        return res.status(401).json({ erro: FALHA_LOGIN_GENERICA });
+    }
+
+    // Restrições do login: IP e horário (síncrono) + país (só aqui, porque
+    // depende de consulta externa e não caberia em toda requisição).
+    // Recusa com a MESMA resposta genérica de senha errada — dizer "seu
+    // IP não é permitido" confirmaria que a credencial está correta, que
+    // é exatamente o que a mensagem única existe pra não entregar.
+    const restricao = avaliarRestricoes(conta, limite.ip);
+    if (!restricao.permitido) {
+        console.warn(`[login] recusado email=${email} ip=${limite.ip} — ${restricao.motivo}`);
+        registrarFalhaLogin({ email, ip: limite.ip, contaExiste: true });
+        return res.status(401).json({ erro: FALHA_LOGIN_GENERICA });
+    }
+
+    const pais = await paisPermitido(conta, limite.ip);
+    if (!pais.ok) {
+        console.warn(`[login] recusado email=${email} ip=${limite.ip} — país ${pais.pais} fora da lista`);
+        registrarFalhaLogin({ email, ip: limite.ip, contaExiste: true });
         return res.status(401).json({ erro: FALHA_LOGIN_GENERICA });
     }
 
@@ -343,7 +411,11 @@ router.post("/contas/consulta", exigirRedeSemHorario, exigirAdmin, (req, res) =>
     const email = normalizarEmailAdmin(req.body.email);
     if (!email) return res.status(400).json({ erro: "Informe o e-mail." });
 
-    const conta = db.prepare("SELECT nome, nivel, criado_em AS criadoEm FROM admins WHERE email = ?").get(email);
+    const conta = db.prepare(`
+        SELECT nome, nivel, criado_em AS criadoEm,
+               ips, horario, fuso_horario AS fusoHorario, paises
+        FROM admins WHERE email = ?
+    `).get(email);
     // Devolve nome e nível pra página preencher com o que já está valendo:
     // sem isso, "sobrescrever" começaria em branco e seria fácil trocar o
     // nível de alguém sem perceber.
@@ -381,12 +453,19 @@ router.put("/contas", exigirRedeSemHorario, exigirAdminComLimite, async (req, re
     // pessoa já na request seguinte (ver identificarAdmin). É o
     // comportamento pedido: sobrescrever credencial tira quem estava
     // dentro, sem esperar o JWT de 12h expirar.
+    const restricoes = lerRestricoes(req.body);
+    if (restricoes.erro) return res.status(400).json({ erro: restricoes.erro });
+
     const agora = Date.now();
-    db.prepare("UPDATE admins SET nome = ?, senha_hash = ?, nivel = ?, senha_alterada_em = ? WHERE email = ?")
-        .run(nome, await hashSenha(senha), nivel, agora, email);
+    db.prepare(`
+        UPDATE admins SET nome = ?, senha_hash = ?, nivel = ?, senha_alterada_em = ?,
+                          ips = ?, horario = ?, fuso_horario = ?, paises = ?
+        WHERE email = ?
+    `).run(nome, await hashSenha(senha), nivel, agora,
+           restricoes.ips, restricoes.horario, restricoes.fusoHorario, restricoes.paises, email);
 
     console.warn(`[contas] SOBRESCRITA email=${email} nivel=${nivel} — sessões abertas encerradas`);
-    res.json({ email, nome, nivel, sessoesEncerradas: true });
+    res.json({ email, nome, nivel, sessoesEncerradas: true, ips: restricoes.ips, horario: restricoes.horario, fusoHorario: restricoes.fusoHorario, paises: restricoes.paises });
 });
 
 // POST /api/admin/contas/remover  { email }
