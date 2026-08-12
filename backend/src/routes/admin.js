@@ -126,14 +126,22 @@ function normalizarEmailAdmin(valor) {
 // uma URL inexistente. O diagnóstico de verdade — qual IP tentou, qual
 // regra barrou — sai no log do servidor, que só o administrador lê.
 router.get("/bootstrap/status", (req, res) => {
+    // Dois níveis, e a diferença é o coração do desenho:
+    //
+    //   permitido  = só IP na allowlist. Decide se a PÁGINA aparece.
+    //   podeCriar  = IP + horário + país. Decide se CRIAR conta é possível.
+    //
+    // Separar os dois é o que permite revogar acesso às 23h. Se a página
+    // inteira dependesse da janela de horário, um notebook roubado de
+    // madrugada só poderia ser cortado no dia seguinte — a trava pensada
+    // pra conter concessão de acesso acabaria impedindo a contenção.
+    if (!ipNaAllowlist(req)) {
+        console.warn(`[bootstrap] status negado ip=${req.ip} — fora da allowlist`);
+        return res.status(404).json({ erro: MENSAGEM_GENERICA });
+    }
+
     avaliarAcesso(req)
-        .then(resultado => {
-            if (!resultado.permitido) {
-                console.warn(`[bootstrap] status negado ip=${resultado.ip} motivo=${resultado.motivoInterno}`);
-                return res.status(404).json({ erro: MENSAGEM_GENERICA });
-            }
-            res.json({ permitido: true });
-        })
+        .then(resultado => res.json({ permitido: true, podeCriar: resultado.permitido === true }))
         .catch(() => res.status(500).json({ erro: MENSAGEM_GENERICA }));
 });
 
@@ -295,75 +303,110 @@ router.get("/eu", exigirNivel('ver'), (req, res) => {
     res.json({ admin: req.admin });
 });
 
-// GET /api/admin/contas — lista os logins existentes (sem hash de senha,
-// obviamente). Só 'full': quem é 'ver' não precisa saber quem mais tem
-// acesso ao painel.
-router.get("/contas", exigirNivel('full'), (req, res) => {
-    const contas = db.prepare(`
-        SELECT id, email, nome, nivel, criado_em AS criadoEm, criado_por AS criadoPor
-        FROM admins ORDER BY criado_em DESC
-    `).all();
-    res.json({ contas });
+// ==========================================================================
+// ADMINISTRAÇÃO DE LOGINS INTERNOS — tudo por ADMIN_TOKEN, na página
+// criar-acesso/. NÃO fica no painel de moderação de propósito: conta de
+// funcionário não é "moderação" (que trata de usuário final), e ter as
+// duas juntas fazia um 'full' já logado precisar de token + IP + horário
+// pra criar login DENTRO do painel, falhando com 404 mudo.
+//
+// São contas DA EMPRESA, não do funcionário: quem administra é o dono do
+// ADMIN_TOKEN. Por isso não existe mais "trocar minha senha" — redefinir
+// a senha de alguém é sobrescrever a conta (PUT abaixo).
+//
+// Nada disto entra em log_auditoria_moderacao: aquela tabela registra
+// mudança em dado de USUÁRIO FINAL, com finalidade jurídica. Credencial
+// interna é outra categoria — misturar poluiria o histórico que importa.
+// O rastro fica no log do servidor.
+//
+// PORTÕES, e a diferença é intencional:
+//   - CRIAR conta nova ......... IP + horário + token
+//     (conceder acesso novo é justamente o que a janela existe pra conter)
+//   - SOBRESCREVER / APAGAR .... IP + token, SEM horário
+//     (são ações de CONTENÇÃO: notebook roubado às 23h precisa de corte
+//      imediato, e uma trava de horário viraria incidente em espera)
+//
+// Ressalva conhecida: sobrescrever permite elevar 'ver' -> 'full', ou
+// seja, conceder acesso sem passar pela janela. Aceito por simplicidade —
+// quem faz isso já tem o ADMIN_TOKEN, que é a proteção real.
+// ==========================================================================
+
+// POST /api/admin/contas/consulta  { email }
+// A página pergunta ANTES de decidir os botões: e-mail sem conta mostra
+// "Salvar"; com conta, mostra "Salvar alterações" + "Apagar".
+//
+// Exige ADMIN_TOKEN porque isto É um oráculo de enumeração — diz quais
+// e-mails têm login. Atrás do token tudo bem (quem o tem já pode tudo);
+// aberto, desfaria o cuidado que a rota de login tem em não revelar quais
+// contas existem.
+router.post("/contas/consulta", exigirRedeSemHorario, exigirAdmin, (req, res) => {
+    const email = normalizarEmailAdmin(req.body.email);
+    if (!email) return res.status(400).json({ erro: "Informe o e-mail." });
+
+    const conta = db.prepare("SELECT nome, nivel, criado_em AS criadoEm FROM admins WHERE email = ?").get(email);
+    // Devolve nome e nível pra página preencher com o que já está valendo:
+    // sem isso, "sobrescrever" começaria em branco e seria fácil trocar o
+    // nível de alguém sem perceber.
+    res.json({ existe: Boolean(conta), conta: conta || null });
 });
 
-// DELETE /api/admin/contas/:id — revoga um login. Como identificarAdmin
-// recheca o banco a cada request (ver middleware/identidadeAdmin.js), a
-// sessão da pessoa excluída morre na request seguinte, sem esperar o JWT
-// expirar sozinho.
-router.delete("/contas/:id", exigirNivel('full'), (req, res) => {
-    const conta = db.prepare("SELECT id, email FROM admins WHERE id = ?").get(req.params.id);
-    if (!conta) return res.status(404).json({ erro: "Login não encontrado." });
-
-    // Não deixa apagar o próprio login: evita o cenário bobo de alguém se
-    // trancar do lado de fora e precisar do ADMIN_TOKEN pra voltar.
-    if (req.admin.id === conta.id) {
-        return res.status(400).json({ erro: "Não dá pra excluir o próprio login." });
+// PUT /api/admin/contas  { email, nome, senha, nivel } — sobrescreve.
+router.put("/contas", exigirRedeSemHorario, exigirAdminComLimite, async (req, res) => {
+    if (!ADMIN_SESSION_SECRET) {
+        return res.status(500).json({ erro: "Servidor sem ADMIN_SESSION_SECRET configurado (ver .env)." });
     }
 
-    // Nem apagar o último 'full' que sobrou — senão ninguém mais consegue
-    // acessar a moderação, nem criar/remover contas, sem recorrer ao
-    // ADMIN_TOKEN de novo.
-    const contaAlvo = db.prepare("SELECT nivel FROM admins WHERE id = ?").get(req.params.id);
-    if (contaAlvo.nivel === "full") {
+    const email = normalizarEmailAdmin(req.body.email);
+    const nome = String(req.body.nome || "").trim().slice(0, 80);
+    const senha = String(req.body.senha || "");
+    const nivel = req.body.nivel === "full" ? "full" : (req.body.nivel === "ver" ? "ver" : null);
+
+    const conta = db.prepare("SELECT * FROM admins WHERE email = ?").get(email);
+    if (!conta) return res.status(404).json({ erro: "Não existe login com esse e-mail." });
+    if (!nome) return res.status(400).json({ erro: "nome é obrigatório." });
+    if (!nivel) return res.status(400).json({ erro: "nivel precisa ser 'ver' ou 'full'." });
+    if (senha.length < 10) return res.status(400).json({ erro: "A senha precisa ter pelo menos 10 caracteres." });
+
+    // Rebaixar o último 'full' deixaria a operação sem ninguém capaz de
+    // usar a moderação. O ADMIN_TOKEN ainda resolveria, mas é erro fácil
+    // de cometer e chato de descobrir depois.
+    if (conta.nivel === "full" && nivel !== "full") {
         const totalFull = db.prepare("SELECT COUNT(*) AS total FROM admins WHERE nivel = 'full'").get().total;
         if (totalFull <= 1) {
-            return res.status(400).json({ erro: "Esse é o último login 'full' — crie outro antes de excluir este." });
+            return res.status(400).json({ erro: "Esse é o último login 'full' — crie outro antes de rebaixar este." });
         }
     }
 
-    db.prepare("DELETE FROM admins WHERE id = ?").run(req.params.id);
-    res.status(204).end();
+    // senha_alterada_em = agora derruba TODAS as sessões abertas dessa
+    // pessoa já na request seguinte (ver identificarAdmin). É o
+    // comportamento pedido: sobrescrever credencial tira quem estava
+    // dentro, sem esperar o JWT de 12h expirar.
+    const agora = Date.now();
+    db.prepare("UPDATE admins SET nome = ?, senha_hash = ?, nivel = ?, senha_alterada_em = ? WHERE email = ?")
+        .run(nome, await hashSenha(senha), nivel, agora, email);
+
+    console.warn(`[contas] SOBRESCRITA email=${email} nivel=${nivel} — sessões abertas encerradas`);
+    res.json({ email, nome, nivel, sessoesEncerradas: true });
 });
 
-// POST /api/admin/trocar-senha — a própria pessoa troca a sua senha
-// (precisa da senha atual). Trocar senha de OUTRA pessoa não existe de
-// propósito: se alguém esqueceu, o caminho é criar um login novo com o
-// ADMIN_TOKEN e excluir o antigo — sem rota que permita sequestrar conta
-// alheia.
-router.post("/trocar-senha", exigirNivel('ver'), async (req, res) => {
-    const senhaAtual = String(req.body.senhaAtual || "");
-    const senhaNova = String(req.body.senhaNova || "");
+// POST /api/admin/contas/remover  { email }
+// POST e não DELETE porque o alvo vai no corpo (e-mail em path exigiria
+// encoding, e alguns proxies descartam corpo em DELETE).
+router.post("/contas/remover", exigirRedeSemHorario, exigirAdminComLimite, (req, res) => {
+    const email = normalizarEmailAdmin(req.body.email);
+    const conta = db.prepare("SELECT id, nivel FROM admins WHERE email = ?").get(email);
+    if (!conta) return res.status(404).json({ erro: "Não existe login com esse e-mail." });
 
-    if (senhaNova.length < 10) {
-        return res.status(400).json({ erro: "A senha nova precisa ter pelo menos 10 caracteres." });
+    if (conta.nivel === "full") {
+        const totalFull = db.prepare("SELECT COUNT(*) AS total FROM admins WHERE nivel = 'full'").get().total;
+        if (totalFull <= 1) {
+            return res.status(400).json({ erro: "Esse é o último login 'full' — crie outro antes de apagar este." });
+        }
     }
 
-    const conta = db.prepare("SELECT senha_hash FROM admins WHERE id = ?").get(req.admin.id);
-    if (!conta || !(await verificarSenha(senhaAtual, conta.senha_hash))) {
-        return res.status(401).json({ erro: "Senha atual incorreta." });
-    }
-
-    const agora = Date.now();
-    db.prepare("UPDATE admins SET senha_hash = ?, senha_alterada_em = ? WHERE id = ?")
-        .run(await hashSenha(senhaNova), agora, req.admin.id);
-
-    // Devolve uma sessão NOVA: a troca acabou de invalidar todas as
-    // sessões anteriores (ver identificarAdmin), inclusive a de quem está
-    // trocando. Sem isto, quem troca a própria senha é deslogado no ato —
-    // efeito correto do ponto de vista de segurança, mas absurdo de usar.
-    // O front substitui o token guardado por este.
-    const contaAtualizada = db.prepare("SELECT * FROM admins WHERE id = ?").get(req.admin.id);
-    res.json({ token: assinarSessaoAdmin(contaAtualizada) });
+    db.prepare("DELETE FROM admins WHERE id = ?").run(conta.id);
+    console.warn(`[contas] REMOVIDA email=${email}`);
+    res.status(204).end();
 });
 
 // Lê ?limit= da query string, com um teto (LIMITE_MAXIMO) pra ninguém
