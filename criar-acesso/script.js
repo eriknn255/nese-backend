@@ -91,6 +91,13 @@ function aplicarEstadoConsulta(existe, conta) {
     if (conta) {
       document.getElementById('nome').value = conta.nome || '';
       document.getElementById('nivel').value = conta.nivel || 'ver';
+      // Restrições atuais também: sem isso, sobrescrever começaria com os
+      // campos em branco e o servidor recusaria — ou pior, o admin
+      // digitaria de novo e trocaria sem querer o que já valia.
+      document.getElementById('r-ips').value = (conta.ips || '').split(',').filter(Boolean).join('\n');
+      document.getElementById('r-horario').value = conta.horario || '';
+      document.getElementById('r-fuso').value = conta.fusoHorario || '';
+      document.getElementById('r-paises').value = (conta.paises || '').split(',').filter(Boolean).join('\n');
     }
   } else {
     box.textContent = podeCriarConta
@@ -137,12 +144,21 @@ async function chamar(url, corpo, metodo) {
   return data;
 }
 
+function linhasPara(valor) {
+  return String(valor || '').split('\n').map(x => x.trim()).filter(Boolean);
+}
+
 function dadosFormulario() {
   return {
     email: document.getElementById('email').value.trim(),
     nome: document.getElementById('nome').value.trim(),
     senha: document.getElementById('senha').value,
-    nivel: document.getElementById('nivel').value
+    nivel: document.getElementById('nivel').value,
+    // Restrições DESTE login — obrigatórias no servidor (IP e horário).
+    ips: linhasPara(document.getElementById('r-ips').value),
+    horario: document.getElementById('r-horario').value.trim(),
+    fusoHorario: document.getElementById('r-fuso').value.trim(),
+    paises: linhasPara(document.getElementById('r-paises').value)
   };
 }
 
@@ -167,7 +183,8 @@ document.getElementById('btn-verificar').addEventListener('click', () => comBota
   if (!email) return mostrarMensagem('Informe o e-mail.', true);
 
   const data = await chamar(ENDPOINT_CONSULTA, { email });
-  if (data) aplicarEstadoConsulta(Boolean(data.existe), data.conta);
+  if (!data) return;
+  aplicarEstadoConsulta(Boolean(data.existe), data.conta);
 }));
 
 document.getElementById('btn-criar').addEventListener('click', () => comBotao('btn-criar', async () => {
@@ -206,6 +223,7 @@ document.getElementById('btn-apagar').addEventListener('click', () => comBotao('
 // libera só a criação. É o que permite apagar/sobrescrever fora de hora
 // sem afrouxar a regra de conceder acesso novo.
 let podeCriarConta = false;
+
 
 async function verificarRede() {
   try {
