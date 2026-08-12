@@ -66,6 +66,41 @@
       </select>
     </label>
 
+    <!-- ============ RESTRIÇÕES DESTE LOGIN ============
+         De onde e quando ESTA credencial pode ser usada. Não têm relação
+         com as regras que guardam esta página (essas ficam em
+         config/acesso.json + .env e valem só pro admin).
+
+         IP e horário são obrigatórios: o servidor recusa criar login sem
+         eles. País é opcional — geo-IP erra com VPN e operadora móvel, e
+         exigir uma camada não confiável só geraria bloqueio inexplicável.
+
+         Verificados a CADA requisição: sair da janela derruba a sessão
+         aberta, não só impede de entrar. -->
+    <fieldset class="restricoes">
+      <legend>Restrições de uso deste login</legend>
+
+      <label>
+        <span>IPs autorizados (um por linha; aceita CIDR)</span>
+        <textarea id="r-ips" rows="2" spellcheck="false" placeholder="168.90.91.0/24"></textarea>
+      </label>
+
+      <label>
+        <span>Janela de horário (HH:MM-HH:MM)</span>
+        <input type="text" id="r-horario" placeholder="08:00-18:00" autocomplete="off">
+      </label>
+
+      <label>
+        <span>Fuso horário</span>
+        <input type="text" id="r-fuso" value="America/Fortaleza" autocomplete="off">
+      </label>
+
+      <label>
+        <span>Países permitidos (um por linha; vazio = qualquer)</span>
+        <textarea id="r-paises" rows="2" spellcheck="false" placeholder="Brazil"></textarea>
+      </label>
+    </fieldset>
+
     <div class="msg" id="msg" hidden></div>
 
     <!-- Botões trocam conforme a consulta. Nenhum aparece antes dela:
@@ -75,6 +110,7 @@
     <button type="button" id="btn-salvar" hidden>Salvar alterações</button>
     <button type="button" id="btn-apagar" class="btn-perigo" hidden>Apagar para sempre</button>
   </form>
+
 </main>
 
 <script src="script.js"></script>
