@@ -6,8 +6,13 @@ const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
 const db = require("../db");
 const { exigirNivel } = require("../middleware/identidadeAdmin");
-const { exigirRedeAutorizada, avaliarAcesso, MENSAGEM_GENERICA } = require("../middleware/redeAutorizada");
-const { hashSenha, verificarSenha } = require("../utils/senha");
+const { exigirRedeAutorizada, avaliarAcesso, ipNaAllowlist, MENSAGEM_GENERICA } = require("../middleware/redeAutorizada");
+const { hashSenha, verificarSenha, gastarTempoEquivalente } = require("../utils/senha");
+const {
+    verificarLimiteLogin, registrarFalhaLogin, registrarSucessoLogin,
+    tokenBloqueado, registrarFalhaToken, registrarSucessoToken,
+    desbloquear, listarBloqueios
+} = require("../middleware/limiteLogin");
 const { registrarAuditoria, diffCampos } = require("../utils/auditoria");
 const { obterLocalizacoesEmLote } = require("../utils/ipLocalizacao");
 const { temAlgumaCapa } = require("../utils/midia");
@@ -56,6 +61,37 @@ function exigirAdmin(req, res, next) {
     if (!tokenValido) {
         return res.status(401).json({ erro: "Token de admin inválido." });
     }
+    next();
+}
+
+// Mesma checagem, com freio de tentativas por IP (ver registrarFalhaToken
+// em middleware/limiteLogin.js). Usado só onde o ADMIN_TOKEN é a
+// credencial — criar login e desbloquear.
+//
+// Bloqueado responde 404 GENÉRICO, não 401: um 401 confirmaria "a rota
+// existe, você só errou o segredo", e depois de bloquear não há motivo pra
+// seguir dando esse retorno. É o mesmo silêncio da página criar-acesso/.
+function exigirAdminComLimite(req, res, next) {
+    if (!ADMIN_TOKEN) {
+        return res.status(500).json({ erro: "Servidor sem ADMIN_TOKEN configurado (ver .env)." });
+    }
+
+    const bloqueio = tokenBloqueado(req.ip);
+    if (bloqueio) {
+        console.warn(`[token] tentativa recusada ip=${req.ip} — bloqueado (${bloqueio.motivo})`);
+        return res.status(404).json({ erro: MENSAGEM_GENERICA });
+    }
+
+    const tokenBuffer = Buffer.from(req.header("X-Admin-Token") || "");
+    const tamanhosIguais = tokenBuffer.length === ADMIN_TOKEN_BUFFER.length;
+    const tokenValido = tamanhosIguais && crypto.timingSafeEqual(tokenBuffer, ADMIN_TOKEN_BUFFER);
+
+    if (!tokenValido) {
+        registrarFalhaToken(req.ip);
+        return res.status(401).json({ erro: "Token de admin inválido." });
+    }
+
+    registrarSucessoToken(req.ip);
     next();
 }
 
@@ -115,7 +151,7 @@ router.get("/bootstrap/status", (req, res) => {
 // Um 'full' logado NÃO pode criar conta: quem cria acesso precisa do
 // segredo do servidor, senão bastaria uma sessão vazada pra alguém
 // fabricar acessos permanentes pra si mesmo.
-router.post("/contas", exigirRedeAutorizada, exigirAdmin, (req, res) => {
+router.post("/contas", exigirRedeAutorizada, exigirAdminComLimite, async (req, res) => {
     if (!ADMIN_SESSION_SECRET) {
         return res.status(500).json({ erro: "Servidor sem ADMIN_SESSION_SECRET configurado (ver .env)." });
     }
@@ -139,7 +175,7 @@ router.post("/contas", exigirRedeAutorizada, exigirAdmin, (req, res) => {
         id: uuidv4(),
         email,
         nome,
-        senha_hash: hashSenha(senha),
+        senha_hash: await hashSenha(senha),
         nivel,
         criado_em: Date.now(),
         // Se quem criou já estava logado, guarda o e-mail dele; se veio só
@@ -159,31 +195,96 @@ router.post("/contas", exigirRedeAutorizada, exigirAdmin, (req, res) => {
 // POST /api/admin/login — email+senha, devolve o JWT de sessão. NÃO passa
 // por exigirAdmin de propósito: é justamente a rota que existe pra quem
 // não tem o segredo do servidor conseguir entrar.
-router.post("/login", (req, res) => {
+// UMA resposta pra toda falha: credencial errada, e-mail inexistente,
+// bloqueado por tentativas, bloqueado por IP. Mesmo status, mesmo texto —
+// e, com gastarTempoEquivalente, mesmo tempo. Quem tenta adivinhar não
+// consegue distinguir os casos nem pela mensagem nem pelo relógio.
+const FALHA_LOGIN_GENERICA = "E-mail ou senha inválidos.";
+
+router.post("/login", async (req, res) => {
     if (!ADMIN_SESSION_SECRET) {
         return res.status(500).json({ erro: "Servidor sem ADMIN_SESSION_SECRET configurado (ver .env)." });
     }
 
     const email = normalizarEmailAdmin(req.body.email);
     const senha = String(req.body.senha || "");
-    const conta = db.prepare("SELECT * FROM admins WHERE email = ?").get(email);
 
-    // Mesma mensagem pros dois casos (e-mail inexistente / senha errada) —
-    // não entrega pra quem está tentando adivinhar quais e-mails existem.
-    // verificarSenha roda mesmo sem conta encontrada pra não vazar por
-    // timing que o e-mail não existe (scrypt é caro; responder instantâneo
-    // só quando o e-mail é desconhecido seria um sinal claro).
-    const hashParaChecar = conta ? conta.senha_hash : hashSenha("senha-descartavel-so-pra-gastar-o-mesmo-tempo");
-    const senhaOk = verificarSenha(senha, hashParaChecar);
-
-    if (!conta || !senhaOk) {
-        return res.status(401).json({ erro: "E-mail ou senha inválidos." });
+    const limite = verificarLimiteLogin(req, email);
+    if (limite.bloqueado) {
+        console.warn(`[login] tentativa recusada ip=${limite.ip} email=${email} — ${limite.motivo}`);
+        // Paga o mesmo custo de um login normal ANTES de responder: sem
+        // isso a resposta sairia instantânea e denunciaria o bloqueio.
+        await gastarTempoEquivalente();
+        return res.status(401).json({ erro: FALHA_LOGIN_GENERICA });
     }
 
+    const conta = db.prepare("SELECT * FROM admins WHERE email = ?").get(email);
+
+    // Sem conta encontrada, ainda assim gasta o tempo de um scrypt (mesmo
+    // motivo acima) em vez de retornar de imediato.
+    const senhaOk = conta ? await verificarSenha(senha, conta.senha_hash) : false;
+    if (!conta) await gastarTempoEquivalente();
+
+    if (!conta || !senhaOk) {
+        registrarFalhaLogin({ email, ip: limite.ip, contaExiste: Boolean(conta) });
+        return res.status(401).json({ erro: FALHA_LOGIN_GENERICA });
+    }
+
+    registrarSucessoLogin(email);
     res.json({
         token: assinarSessaoAdmin(conta),
         admin: { id: conta.id, email: conta.email, nome: conta.nome, nivel: conta.nivel }
     });
+});
+
+// ==========================================================================
+// RECUPERAÇÃO DE BLOQUEIO — a saída de emergência do limite de login (ver
+// middleware/limiteLogin.js). Substitui a antiga isenção por IP, que era
+// furada: quem estivesse na mesma rede herdava a isenção sem saber segredo
+// nenhum.
+//
+// DUAS travas, iguais às de criar login: estar num IP da allowlist E ter o
+// ADMIN_TOKEN. A diferença é que aqui NÃO se aplica a janela de horário
+// (ipNaAllowlist em vez de exigirRedeAutorizada): recuperar acesso é
+// justamente o que se precisa fazer fora de hora, e uma trava de horário
+// no botão de emergência transformaria "esperei o bloqueio passar" na
+// única opção — que é o problema que esta rota existe pra resolver.
+//
+// Só o ADMIN_TOKEN protege de verdade contra o colega de rede; o IP é a
+// segunda camada.
+function exigirRedeSemHorario(req, res, next) {
+    if (!ipNaAllowlist(req)) {
+        console.warn(`[login] desbloqueio recusado — IP fora da allowlist: ${req.ip}`);
+        return res.status(404).json({ erro: MENSAGEM_GENERICA });
+    }
+    next();
+}
+
+// POST /api/admin/desbloquear  { alvo: "email@x.com" | "1.2.3.4" | "" }
+// alvo vazio limpa TODOS os bloqueios.
+// exigirAdmin SEM limite de tentativas, de propósito — e isso merece
+// justificativa porque parece um furo.
+//
+// Se esta rota usasse exigirAdminComLimite, errar o ADMIN_TOKEN 5 vezes
+// bloquearia o IP E fecharia a própria rota de recuperação: beco sem
+// saída, resolvido só com SSH no servidor. Um freio que tranca a saída de
+// emergência não protege, só transforma erro de digitação em incidente.
+//
+// O risco aceito é pequeno: o ADMIN_TOKEN é um segredo longo e aleatório,
+// e força bruta contra isso por HTTP é inviável com ou sem rate limit — o
+// limite em /contas é tripwire e sinal de log, não a defesa real. A defesa
+// real é o token ser forte (se ele ainda for o placeholder do
+// .env.example, TROQUE) somado à exigência de IP na allowlist.
+router.post("/desbloquear", exigirRedeSemHorario, exigirAdmin, (req, res) => {
+    const resultado = desbloquear(req.body.alvo);
+    console.warn(`[login] DESBLOQUEIO manual: alvo=${resultado.alvo} bloqueios=${resultado.bloqueios} tentativas=${resultado.tentativas}`);
+    res.json(resultado);
+});
+
+// GET /api/admin/bloqueios — o que está bloqueado agora. Nível 'full':
+// saber quem está travado é informação de administração, não de leitura.
+router.get("/bloqueios", exigirNivel('full'), (req, res) => {
+    res.json({ bloqueios: listarBloqueios() });
 });
 
 // GET /api/admin/eu — quem sou eu / meu nível. O front chama isso logo
@@ -239,7 +340,7 @@ router.delete("/contas/:id", exigirNivel('full'), (req, res) => {
 // propósito: se alguém esqueceu, o caminho é criar um login novo com o
 // ADMIN_TOKEN e excluir o antigo — sem rota que permita sequestrar conta
 // alheia.
-router.post("/trocar-senha", exigirNivel('ver'), (req, res) => {
+router.post("/trocar-senha", exigirNivel('ver'), async (req, res) => {
     const senhaAtual = String(req.body.senhaAtual || "");
     const senhaNova = String(req.body.senhaNova || "");
 
@@ -248,12 +349,21 @@ router.post("/trocar-senha", exigirNivel('ver'), (req, res) => {
     }
 
     const conta = db.prepare("SELECT senha_hash FROM admins WHERE id = ?").get(req.admin.id);
-    if (!conta || !verificarSenha(senhaAtual, conta.senha_hash)) {
+    if (!conta || !(await verificarSenha(senhaAtual, conta.senha_hash))) {
         return res.status(401).json({ erro: "Senha atual incorreta." });
     }
 
-    db.prepare("UPDATE admins SET senha_hash = ? WHERE id = ?").run(hashSenha(senhaNova), req.admin.id);
-    res.status(204).end();
+    const agora = Date.now();
+    db.prepare("UPDATE admins SET senha_hash = ?, senha_alterada_em = ? WHERE id = ?")
+        .run(await hashSenha(senhaNova), agora, req.admin.id);
+
+    // Devolve uma sessão NOVA: a troca acabou de invalidar todas as
+    // sessões anteriores (ver identificarAdmin), inclusive a de quem está
+    // trocando. Sem isto, quem troca a própria senha é deslogado no ato —
+    // efeito correto do ponto de vista de segurança, mas absurdo de usar.
+    // O front substitui o token guardado por este.
+    const contaAtualizada = db.prepare("SELECT * FROM admins WHERE id = ?").get(req.admin.id);
+    res.json({ token: assinarSessaoAdmin(contaAtualizada) });
 });
 
 // Lê ?limit= da query string, com um teto (LIMITE_MAXIMO) pra ninguém
