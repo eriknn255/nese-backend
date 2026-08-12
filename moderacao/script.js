@@ -18,6 +18,8 @@ const ENDPOINT_USUARIO_DETALHE_BASE = `${BASE_API}/dashboard/usuarios/`;
 const ENDPOINT_MODERACAO_USUARIOS = `${BASE_API}/moderacao/usuarios/`;
 const ENDPOINT_MODERACAO_PRESTADORES = `${BASE_API}/moderacao/prestadores`;
 const ENDPOINT_MODERACAO_LOG = `${BASE_API}/moderacao/log`;
+const ENDPOINT_CONTAS = `${BASE_API}/contas`;
+const ENDPOINT_TROCAR_SENHA = `${BASE_API}/trocar-senha`;
 
 // Mesma origem do backend, pra resolver avatar customizado (caminho
 // relativo) — mesmo raciocínio de resolverAvatarUrl em script.js.
@@ -186,7 +188,7 @@ function limparErro() {
 async function chamarApi(url, opcoes = {}) {
   const token = getToken();
   if (!token) {
-    throw new Error('Preencha o token de admin acima pra carregar.');
+    throw new Error('Sessão ausente. Entre de novo.');
   }
   const res = await fetch(url, {
     ...opcoes,
@@ -212,14 +214,16 @@ async function chamarApi(url, opcoes = {}) {
 }
 
 // ==========================================================================
-// ABAS — só duas por enquanto (Usuários / Prestadores), mesmo padrão
-// data-aba do dashboard, versão simplificada (sem sidebar retrátil).
+// ABAS — Usuários / Prestadores / Log de auditoria / Contas de acesso,
+// mesmo padrão data-aba do dashboard, versão simplificada (sem sidebar
+// retrátil).
 // ==========================================================================
 
 const TITULOS_ABA = {
   usuarios: 'Usuários',
   prestadores: 'Prestadores',
-  log: 'Log de auditoria'
+  log: 'Log de auditoria',
+  contas: 'Contas de acesso'
 };
 
 function ativarAba(aba) {
@@ -248,6 +252,7 @@ function carregarAbaAtiva() {
   if (aba === 'usuarios') carregarUsuarios();
   if (aba === 'prestadores') carregarPrestadores();
   if (aba === 'log') carregarLog();
+  if (aba === 'contas') carregarContas();
 }
 
 // ==========================================================================
@@ -788,6 +793,147 @@ async function buscarHistoricoEntidadeHtml(entidadeTipo, entidadeId) {
     return `<div class="empty-state" style="padding:14px 0;">Não foi possível carregar o histórico (${escaparHtml(e.message)}).</div>`;
   }
 }
+
+
+// ==========================================================================
+// CONTAS DE ACESSO — gestão dos logins internos (ver rotas /contas,
+// /trocar-senha em admin.js). Aba só de nível 'full': o backend responde
+// 403 pra 'ver', e de todo jeito quem é 'ver' nem entra nesta página.
+//
+// Criar login NÃO usa a sessão atual: exige o ADMIN_TOKEN do servidor
+// (campo próprio no formulário, nunca persistido). É de propósito — uma
+// sessão 'full' vazada não pode fabricar acessos novos.
+// ==========================================================================
+
+const LABEL_NIVEL = {
+  ver: 'ver — só dashboard',
+  full: 'full — dashboard + moderação'
+};
+
+function mostrarMensagemForm(id, texto, ehErro) {
+  const el = document.getElementById(id);
+  el.textContent = texto;
+  el.classList.toggle('form-conta-msg-erro', !!ehErro);
+  el.hidden = false;
+}
+
+async function carregarContas() {
+  const tbody = document.getElementById('contas-tbody');
+  try {
+    const data = await chamarApi(ENDPOINT_CONTAS);
+    renderContas(data.contas || []);
+  } catch (e) {
+    mostrarErro(`Não foi possível carregar as contas (${e.message}).`);
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-state">${escaparHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderContas(contas) {
+  const tbody = document.getElementById('contas-tbody');
+
+  if (contas.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhuma conta cadastrada.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = contas.map(conta => {
+    const souEu = adminAtual && adminAtual.id === conta.id;
+    return `
+      <tr>
+        <td>${escaparHtml(conta.nome)}${souEu ? ' <span class="meta">(você)</span>' : ''}</td>
+        <td>${escaparHtml(conta.email)}</td>
+        <td>${escaparHtml(LABEL_NIVEL[conta.nivel] || conta.nivel)}</td>
+        <td class="last-seen">${formatarDataExata(conta.criadoEm)}</td>
+        <td class="meta">${escaparHtml(conta.criadoPor || '—')}</td>
+        <td>
+          ${souEu
+            ? ''
+            : `<button type="button" class="toolbar-btn toolbar-btn-perigo" data-excluir-conta="${escaparHtml(conta.id)}" data-nome="${escaparHtml(conta.nome)}">Revogar</button>`}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  tbody.querySelectorAll('[data-excluir-conta]').forEach(btn => {
+    btn.addEventListener('click', () => excluirConta(btn.dataset.excluirConta, btn.dataset.nome));
+  });
+}
+
+async function excluirConta(id, nome) {
+  if (!confirm(`Revogar o acesso de "${nome}"? A sessão dessa pessoa cai na próxima request.`)) return;
+
+  try {
+    await chamarApi(`${ENDPOINT_CONTAS}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    carregarContas();
+  } catch (e) {
+    mostrarErro(`Não foi possível revogar (${e.message}).`);
+  }
+}
+
+document.getElementById('form-nova-conta').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const botao = document.getElementById('nova-conta-btn');
+  botao.disabled = true;
+
+  const tokenServidor = document.getElementById('nova-conta-token').value.trim();
+
+  try {
+    // fetch direto (não chamarApi): esta rota é autenticada pelo
+    // ADMIN_TOKEN do servidor, não pelo JWT da sessão.
+    const res = await fetch(ENDPOINT_CONTAS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': tokenServidor },
+      body: JSON.stringify({
+        nome: document.getElementById('nova-conta-nome').value.trim(),
+        email: document.getElementById('nova-conta-email').value.trim(),
+        senha: document.getElementById('nova-conta-senha').value,
+        nivel: document.getElementById('nova-conta-nivel').value
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.erro || `Falha ao criar (HTTP ${res.status}).`);
+
+    mostrarMensagemForm('nova-conta-msg', `Login "${data.email}" criado como ${data.nivel}.`, false);
+    document.getElementById('form-nova-conta').reset();
+    carregarContas();
+  } catch (e) {
+    mostrarMensagemForm('nova-conta-msg', e.message, true);
+  } finally {
+    botao.disabled = false;
+  }
+});
+
+document.getElementById('form-trocar-senha').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const botao = document.getElementById('trocar-senha-btn');
+  botao.disabled = true;
+
+  try {
+    const resposta = await chamarApi(ENDPOINT_TROCAR_SENHA, {
+      method: 'POST',
+      body: JSON.stringify({
+        senhaAtual: document.getElementById('senha-atual').value,
+        senhaNova: document.getElementById('senha-nova').value
+      })
+    });
+
+    // Trocar a senha invalida TODAS as sessões abertas — inclusive esta
+    // (ver senha_alterada_em em identidadeAdmin.js). O backend devolve um
+    // token novo justamente pra quem trocou não ser deslogado no ato;
+    // guardar ele aqui é o que mantém a aba funcionando. Sem isso, a
+    // próxima request cairia em 401 e jogaria a pessoa pra tela de login
+    // logo depois de trocar a senha com sucesso.
+    if (resposta && resposta.token) salvarSessao(resposta.token);
+
+    mostrarMensagemForm('trocar-senha-msg',
+      'Senha trocada. Sessões abertas em outros navegadores foram encerradas; esta continua ativa.', false);
+    document.getElementById('form-trocar-senha').reset();
+  } catch (e) {
+    mostrarMensagemForm('trocar-senha-msg', e.message, true);
+  } finally {
+    botao.disabled = false;
+  }
+});
 
 // ==========================================================================
 // MODAL genérico (mesmo markup reaproveitado do dashboard)
