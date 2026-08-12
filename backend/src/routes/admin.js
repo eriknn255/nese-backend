@@ -8,6 +8,7 @@ const db = require("../db");
 const { exigirNivel } = require("../middleware/identidadeAdmin");
 const { exigirRedeAutorizada, avaliarAcesso, ipNaAllowlist, MENSAGEM_GENERICA } = require("../middleware/redeAutorizada");
 const { avaliarRestricoes, paisPermitido, listaDe } = require("../utils/restricoesLogin");
+const OPCOES = require("../utils/opcoesRestricao");
 const { hashSenha, verificarSenha, gastarTempoEquivalente } = require("../utils/senha");
 const {
     verificarLimiteLogin, registrarFalhaLogin, registrarSucessoLogin,
@@ -128,19 +129,26 @@ function lerRestricoes(corpo) {
     if (ips.length === 0) {
         return { erro: "Informe ao menos um IP autorizado para este login." };
     }
+    // Lista FECHADA, não formato livre: horário, fuso e país só podem ser
+    // valores do menu (ver utils/opcoesRestricao.js, a mesma lista que o
+    // front usa pra montar os seletores). Validar só o formato deixaria a
+    // API aceitar janelas que a interface não oferece, e aí voltaria a
+    // existir dado que nenhum seletor consegue representar.
     if (!horario) {
-        return { erro: "Informe a janela de horário deste login (formato HH:MM-HH:MM)." };
+        return { erro: "Escolha a janela de horário deste login." };
     }
-    if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(horario)) {
-        return { erro: "Horário deve estar no formato HH:MM-HH:MM." };
+    if (!OPCOES.HORARIOS_VALIDOS.includes(horario)) {
+        return { erro: `Janela de horário inválida: ${horario}` };
     }
     if (!fusoHorario) {
-        return { erro: "Informe o fuso horário — sem ele a janela seria interpretada no fuso do servidor (UTC), deslocando o horário sem aviso." };
+        return { erro: "Escolha o fuso horário — sem ele a janela seria interpretada no fuso do servidor (UTC), deslocando o horário sem aviso." };
     }
-    try {
-        new Intl.DateTimeFormat("pt-BR", { timeZone: fusoHorario }).format(new Date());
-    } catch (erro) {
+    if (!OPCOES.FUSOS_VALIDOS.includes(fusoHorario)) {
         return { erro: `Fuso horário inválido: ${fusoHorario}` };
+    }
+    const paisForaDaLista = paises.find(x => !OPCOES.PAISES_VALIDOS.includes(x));
+    if (paisForaDaLista) {
+        return { erro: `País inválido: ${paisForaDaLista}` };
     }
 
     return { ips: ips.join(","), horario, fusoHorario, paises: paises.join(",") };
@@ -180,7 +188,13 @@ router.get("/bootstrap/status", (req, res) => {
     }
 
     avaliarAcesso(req)
-        .then(resultado => res.json({ permitido: true, podeCriar: resultado.permitido === true }))
+        .then(resultado => res.json({
+            permitido: true,
+            podeCriar: resultado.permitido === true,
+            // Opções dos seletores vêm daqui, não escritas no HTML: uma
+            // lista só, impossível de divergir da que o servidor valida.
+            opcoes: { horarios: OPCOES.HORARIOS, fusos: OPCOES.FUSOS, paises: OPCOES.PAISES }
+        }))
         .catch(() => res.status(500).json({ erro: MENSAGEM_GENERICA }));
 });
 
