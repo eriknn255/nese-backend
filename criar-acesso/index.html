@@ -9,41 +9,74 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/google-sans-flex/wght.css">
 </head>
 <body>
+
+<!-- ==========================================================================
+     ADMINISTRAÇÃO DE LOGINS INTERNOS — única tela pra criar, sobrescrever
+     e apagar credencial de funcionário. Substituiu a aba "Contas de
+     acesso" da moderação: conta de funcionário não é moderação, e ter as
+     duas portas dobrava manutenção sem ganho.
+
+     O formulário se adapta: preenchido o e-mail, a página consulta se já
+     existe login. Não existe -> um botão (Salvar). Existe -> dois
+     (Salvar alterações / Apagar para sempre).
+
+     Sem sessão: quem manda aqui é o ADMIN_TOKEN + IP na allowlist. Fora
+     disso a página vira um 404 (ver mostrarBloqueio em script.js).
+     ========================================================================== -->
+
 <button id="theme-btn" type="button" aria-label="Alternar tema" hidden>
   <span id="theme-icon">🌙</span><span id="theme-label"></span>
 </button>
+
 <main class="caixa" id="caixa" hidden>
   <img src="/dashboard/img/logo-nese.webp" class="logo-img" alt="" width="44" height="44">
-  <h1 id="titulo" hidden>Criar acesso</h1>
+  <h1 id="titulo" hidden>Acesso interno</h1>
   <div class="status" id="status-verificando"></div>
+
   <form id="form" hidden>
     <label>
-      <span>Token</span>
-      <input type="password" id="token" autocomplete="off">
+      <span>Token de admin</span>
+      <input type="password" id="token" autocomplete="off" required>
     </label>
+
     <label>
-      <span>Nome</span>
-      <input type="text" id="nome" required>
-    </label>
-    <label>
-      <span>E-mail</span>
+      <span>E-mail do funcionário</span>
       <input type="email" id="email" autocomplete="off" required>
     </label>
+
+    <!-- Estado da consulta: diz se aquele e-mail já tem login, pra não
+         restar dúvida sobre o que os botões vão fazer. -->
+    <div class="consulta" id="consulta" hidden></div>
+
     <label>
-      <span>Senha</span>
+      <span>Nome completo</span>
+      <input type="text" id="nome" required>
+    </label>
+
+    <label>
+      <span>Senha (mínimo 10 caracteres)</span>
       <input type="password" id="senha" autocomplete="new-password" minlength="10" required>
     </label>
+
     <label>
       <span>Nível</span>
       <select id="nivel">
-        <option value="full">full</option>
-        <option value="ver">read</option>
+        <option value="ver">ver — somente dashboard</option>
+        <option value="full">full — dashboard + moderação</option>
       </select>
     </label>
+
     <div class="msg" id="msg" hidden></div>
-    <button type="submit" id="btn">Enviar</button>
+
+    <!-- Botões trocam conforme a consulta. Nenhum aparece antes dela:
+         sem saber se a conta existe, "Salvar" seria ambíguo. -->
+    <button type="button" id="btn-verificar">Verificar e-mail</button>
+    <button type="button" id="btn-criar" hidden>Salvar</button>
+    <button type="button" id="btn-salvar" hidden>Salvar alterações</button>
+    <button type="button" id="btn-apagar" class="btn-perigo" hidden>Apagar para sempre</button>
   </form>
 </main>
+
 <script src="script.js"></script>
 </body>
 </html>
