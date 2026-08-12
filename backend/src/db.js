@@ -279,4 +279,64 @@ db.exec(`
     )
 `);
 
+// ==========================================================================
+// TENTATIVAS E BLOQUEIOS DE LOGIN INTERNO — freio de força bruta do
+// POST /api/admin/login (ver limitarLogin em middleware/limiteLogin.js).
+//
+// EM BANCO, não em memória, por dois motivos: bloqueio que evapora num
+// `pm2 restart` não é bloqueio (e o processo reinicia por N motivos
+// banais), e bloqueio invisível é impossível de diagnosticar depois —
+// aqui dá pra responder "por que fulano não consegue entrar?" olhando a
+// tabela, em vez de adivinhar.
+//
+// Duas tabelas em vez de uma: `tentativas_login` é o histórico bruto
+// (usado pra CONTAR dentro de uma janela deslizante) e some rápido;
+// `bloqueios_login` é a decisão já tomada, consultada a cada login. Juntar
+// as duas obrigaria a recontar a janela inteira a cada request só pra
+// saber se alguém está bloqueado.
+//
+// chave: o e-mail digitado (minúsculo) ou o IP, conforme `tipo` — de
+// propósito guarda o e-mail DIGITADO, não o id da conta: e-mail
+// inexistente também precisa ser bloqueável, e nesse caso não existe id
+// nenhum pra referenciar.
+// ==========================================================================
+db.exec(`
+    CREATE TABLE IF NOT EXISTS tentativas_login (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chave TEXT NOT NULL,
+        tipo TEXT NOT NULL CHECK (tipo IN ('email', 'ip')),
+        criado_em INTEGER NOT NULL
+    )
+`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_tentativas_login ON tentativas_login(tipo, chave, criado_em DESC)");
+
+db.exec(`
+    CREATE TABLE IF NOT EXISTS bloqueios_login (
+        chave TEXT NOT NULL,
+        tipo TEXT NOT NULL CHECK (tipo IN ('email', 'ip')),
+        ate INTEGER NOT NULL,
+        motivo TEXT NOT NULL,
+        criado_em INTEGER NOT NULL,
+        PRIMARY KEY (chave, tipo)
+    )
+`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_bloqueios_login_ate ON bloqueios_login(ate DESC)");
+
+// senha_alterada_em: momento da última troca de senha. Serve pra INVALIDAR
+// sessões emitidas antes dela (ver identificarAdmin em
+// middleware/identidadeAdmin.js, que compara com o `iat` do JWT).
+//
+// Sem isso, trocar a senha não expulsava ninguém: quem já tinha um token
+// continuava dentro por até 12h. Isso torna a troca de senha inútil no
+// caso em que ela mais importa — suspeita de que a senha vazou, ou alguém
+// que ficou com a sessão aberta numa máquina que não deveria.
+//
+// DEFAULT 0 nas linhas antigas = "nunca trocou", então nenhuma sessão
+// existente cai na migração.
+const colunasAdmins = db.prepare("PRAGMA table_info(admins)").all();
+if (colunasAdmins.length > 0 && !colunasAdmins.some(c => c.name === "senha_alterada_em")) {
+    db.exec("ALTER TABLE admins ADD COLUMN senha_alterada_em INTEGER NOT NULL DEFAULT 0");
+    console.log("[db] migração aplicada: admins.senha_alterada_em");
+}
+
 module.exports = db;
