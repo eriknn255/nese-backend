@@ -41,7 +41,30 @@ function identificarAdmin(req, res, next) {
 
     try {
         const payload = jwt.verify(token, ADMIN_SESSION_SECRET);
-        const admin = db.prepare("SELECT id, email, nome, nivel FROM admins WHERE id = ?").get(payload.sub);
+        const admin = db.prepare("SELECT id, email, nome, nivel, senha_alterada_em FROM admins WHERE id = ?").get(payload.sub);
+
+        // Sessão emitida ANTES da última troca de senha morre agora. É o
+        // que faz "trocar a senha" expulsar quem estava dentro — sem
+        // isso, um token roubado sobreviveria à troca por até 12h,
+        // justamente no cenário em que se troca a senha por suspeita de
+        // vazamento.
+        //
+        // Comparação em SEGUNDOS dos dois lados. `iat` do JWT vem em
+        // segundos (padrão da spec) e senha_alterada_em em milissegundos —
+        // comparar em ms invalidaria até o token novo devolvido pela
+        // própria troca de senha: emitido no mesmo instante, seu `iat`
+        // truncado pra segundo fica alguns milissegundos "antes" do
+        // carimbo da troca. Quem trocasse a senha era deslogado no ato.
+        //
+        // O efeito colateral é uma janela de 1 segundo em que um token
+        // antigo emitido no mesmo segundo da troca sobrevive. Irrelevante
+        // na prática, e o preço de não quebrar o caso normal.
+        const alteradaEmSegundos = Math.floor((admin && admin.senha_alterada_em || 0) / 1000);
+        if (admin && admin.senha_alterada_em && (payload.iat || 0) < alteradaEmSegundos) {
+            req.admin = null;
+            return next();
+        }
+
         req.admin = admin || null;
     } catch (erro) {
         // Token ausente, expirado, adulterado, ou (comum!) na verdade é o
