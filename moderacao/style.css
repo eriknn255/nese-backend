@@ -627,6 +627,93 @@ a.sidebar-theme-btn { text-decoration: none; }
 
 .modal-prestador-link:hover { text-decoration: underline; }
 
+/* ==========================================================================
+   BADGE DE STATUS (bloqueado/ativo) — usado na tabela de usuários e no
+   topo do modal de edição.
+   ========================================================================== */
+.badge-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+
+.badge-status-bloqueado {
+    background: rgba(211, 18, 0, 0.1);
+    color: var(--red);
+    border: 1px solid rgba(211, 18, 0, 0.3);
+  }
+
+.badge-status-ativo {
+    background: rgba(0, 176, 68, 0.08);
+    color: var(--green);
+    border: 1px solid rgba(0, 176, 68, 0.25);
+  }
+
+/* ==========================================================================
+   MÍDIA DE CAPA (modal de edição do prestador) — miniatura + botão remover
+   por slot. Sem preview real da imagem (o front de moderação não tem CDN
+   público configurado pras fotos) — só mostra "tem" ou "não tem" e deixa
+   remover.
+   ========================================================================== */
+.midia-capa-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 4px 0 8px;
+  }
+
+.midia-capa-slot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+  }
+
+.midia-capa-slot .midia-capa-remover {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--red);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+  }
+
+.midia-capa-slot .midia-capa-remover:hover { text-decoration: underline; }
+
+.midia-capa-slot.midia-capa-vazia {
+    color: var(--muted);
+    opacity: 0.6;
+  }
+
+/* ==========================================================================
+   E-MAILS BLOQUEADOS — lista simples com botão de remover por linha,
+   dentro da aba "Usuários" (ver painel #painel-emails-bloqueados).
+   ========================================================================== */
+.emails-bloqueados-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+
+.emails-bloqueados-item:last-child { border-bottom: none; }
+
 .error-banner {
     background: rgba(217, 100, 90, 0.1);
     border: 1px solid rgba(217, 100, 90, 0.3);
