@@ -84,11 +84,13 @@
       <div class="section-title">Usuários <span class="section-note">(acesso total — clique numa linha pra editar ou excluir a conta)</span></div>
       <div class="table-toolbar">
         <input type="search" id="usuarios-busca" class="table-busca" placeholder="Buscar por nome, e-mail ou ID…">
+        <button type="button" id="btn-emails-bloqueados" class="toolbar-btn" style="margin-left:auto;">E-mails bloqueados</button>
       </div>
       <table>
         <thead>
           <tr>
             <th>Usuário</th>
+            <th>Status</th>
             <th>ID</th>
             <th>Telefone</th>
             <th>CPF/CNPJ</th>
@@ -97,7 +99,7 @@
           </tr>
         </thead>
         <tbody id="usuarios-tbody">
-          <tr><td colspan="6" class="empty-state">carregando…</td></tr>
+          <tr><td colspan="7" class="empty-state">carregando…</td></tr>
         </tbody>
       </table>
     </section>
