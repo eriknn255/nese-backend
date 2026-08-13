@@ -126,6 +126,62 @@ if (!colunasPrestadoresGeo.some(c => c.name === "municipio")) {
 }
 
 // ==========================================================================
+// BLOQUEIO DE CONTA — moderação precisa poder impedir uma conta específica
+// de continuar usando o app (violação de diretrizes), sem precisar
+// excluí-la de vez (excluir apaga o histórico que a própria moderação
+// quer manter como prova/contexto — ver DELETE /moderacao/usuarios/:id,
+// que já faz isso de propósito pra exclusão "de verdade").
+//
+// bloqueado: 0/1. Checado em dois pontos, não só um — mesmo raciocínio já
+// usado pra troca de senha de admin (ver identidadeAdmin.js): bloquear
+// alguém que está *offline* precisa impedir o próximo login
+// (POST /entrar-google, ver routes/usuarios.js), e bloquear alguém que
+// está *com o app aberto agora* (sessão JWT ainda válida por até 30 dias,
+// ver JWT_EXPIRACAO) precisa derrubar a sessão na hora, não só na próxima
+// vez que precisar logar de novo — ver identificarUsuario em
+// middleware/identidade.js, que agora invalida req.usuario a cada request
+// se a conta estiver bloqueada, mesmo com um token assinado válido.
+//
+// bloqueado_motivo/bloqueado_em: texto livre + timestamp de quando a
+// moderação bloqueou — aparecem no modal de edição da conta
+// (moderacao/script.js) pra quem reabrir saber por que already foi
+// bloqueada, sem precisar caçar no log de auditoria geral.
+// ==========================================================================
+if (!colunasUsuarios.some(c => c.name === "bloqueado")) {
+    db.exec("ALTER TABLE usuarios ADD COLUMN bloqueado INTEGER NOT NULL DEFAULT 0");
+    db.exec("ALTER TABLE usuarios ADD COLUMN bloqueado_motivo TEXT");
+    db.exec("ALTER TABLE usuarios ADD COLUMN bloqueado_em INTEGER");
+    console.log("[db] migração aplicada: usuarios.bloqueado/bloqueado_motivo/bloqueado_em");
+}
+
+// ==========================================================================
+// emails_bloqueados — banimento por E-MAIL, separado de usuarios.bloqueado
+// de propósito: cobre os dois casos que uma coluna na tabela usuarios não
+// cobre sozinha —
+//   1. banir antes de existir conta nenhuma com aquele e-mail (a pessoa
+//      ainda nem tentou entrar, ou tentou e foi recusada antes de chegar
+//      a criar linha em `usuarios`);
+//   2. banir e a pessoa reagir excluindo a própria conta (DELETE
+//      /api/usuarios/:id continua disponível pro dono) e tentando criar
+//      outra na sequência com o MESMO e-mail — sem isso, excluir a conta
+//      seria um jeito de escapar de um bloqueio.
+// Checado em POST /entrar-google (routes/usuarios.js) ANTES de criar ou
+// autenticar qualquer conta.
+//
+// email é a PRIMARY KEY (não precisa de id numérico à toa, a busca é
+// sempre "esse e-mail está bloqueado?"). moderador/motivo/criado_em: mesmo
+// padrão de rastreabilidade do restante da moderação.
+// ==========================================================================
+db.exec(`
+    CREATE TABLE IF NOT EXISTS emails_bloqueados (
+        email TEXT PRIMARY KEY,
+        motivo TEXT,
+        moderador TEXT,
+        criado_em INTEGER NOT NULL
+    )
+`);
+
+// ==========================================================================
 // buscas_sem_resultado — uma linha por busca de prestadores que voltou
 // ZERO resultados (ver POST /api/buscas/sem-resultado em routes/buscas.js,
 // chamado pelo client na tela de busca). É o card mais pedido antes de
