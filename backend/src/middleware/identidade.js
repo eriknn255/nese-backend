@@ -31,7 +31,18 @@ function identificarUsuario(req, res, next) {
     const token = cabecalho.slice("Bearer ".length).trim();
     try {
         const payload = jwt.verify(token, JWT_SECRET);
-        req.usuario = db.prepare("SELECT id, nome, email, telefone FROM usuarios WHERE id = ?").get(payload.sub) || null;
+        const usuario = db.prepare("SELECT id, nome, email, telefone, bloqueado FROM usuarios WHERE id = ?").get(payload.sub) || null;
+
+        // Conta bloqueada pela moderação (ver PATCH
+        // /admin/moderacao/usuarios/:id/bloqueio): a sessão morre AGORA,
+        // não só no próximo login. Sem isso, um bloqueio não teria efeito
+        // nenhum em quem já está com o token salvo — a pessoa continuaria
+        // usando o app normalmente pelos próximos até 30 dias (ver
+        // JWT_EXPIRACAO em routes/usuarios.js). Mesmo efeito de
+        // "req.usuario = null" que token ausente/expirado/adulterado já
+        // causa, então exigirUsuario responde 401 do mesmo jeito, sem
+        // precisar de um caminho de erro especial só pra isso.
+        req.usuario = (usuario && !usuario.bloqueado) ? usuario : null;
     } catch (erro) {
         // Token ausente, expirado, adulterado ou assinado com outro
         // segredo — qualquer um desses vira "não identificado", não erro
