@@ -17,7 +17,7 @@ const {
 } = require("../middleware/limiteLogin");
 const { registrarAuditoria, diffCampos } = require("../utils/auditoria");
 const { obterLocalizacoesEmLote } = require("../utils/ipLocalizacao");
-const { temAlgumaCapa } = require("../utils/midia");
+const { temAlgumaCapa, capasDisponiveis, pastaCapaPrestador } = require("../utils/midia");
 const { limparRequestLogsAntigos } = require("../jobs/limparRequestLogs");
 
 const router = express.Router();
@@ -843,6 +843,7 @@ router.get("/dashboard/usuarios", exigirNivel('ver'), (req, res) => {
             u.avatar_customizado AS avatarCustomizado,
             u.criado_em AS criadoEm,
             u.last_seen_at AS lastSeenAt,
+            u.bloqueado,
             (SELECT COUNT(*) FROM prestadores p WHERE p.dono_usuario_id = u.id) AS totalPrestadores,
             lc.pais,
             lc.estado,
@@ -862,6 +863,7 @@ router.get("/dashboard/usuarios", exigirNivel('ver'), (req, res) => {
         criadoEm: u.criadoEm,
         lastSeenAt: u.lastSeenAt,
         online: u.lastSeenAt != null && (agora - u.lastSeenAt) <= MS_ONLINE,
+        bloqueado: !!u.bloqueado,
         totalPrestadores: u.totalPrestadores,
         pais: u.pais,
         estado: u.estado,
@@ -887,13 +889,15 @@ router.get("/dashboard/usuarios/:id", exigirNivel('ver'), (req, res) => {
     const usuario = db.prepare(`
         SELECT id, nome, email, telefone, cpf_cnpj AS cpfCnpj,
                avatar_url AS avatarUrl, avatar_customizado AS avatarCustomizado,
-               criado_em AS criadoEm, last_seen_at AS lastSeenAt
+               criado_em AS criadoEm, last_seen_at AS lastSeenAt,
+               bloqueado, bloqueado_motivo AS bloqueadoMotivo, bloqueado_em AS bloqueadoEm
         FROM usuarios WHERE id = ?
     `).get(req.params.id);
 
     if (!usuario) {
         return res.status(404).json({ erro: "Usuário não encontrado." });
     }
+    usuario.bloqueado = !!usuario.bloqueado;
 
     // Snapshot congelado do cadastro — ver comentário em schema.sql sobre
     // log_cadastros nunca ser um espelho ao vivo de `usuarios`.
@@ -2861,8 +2865,8 @@ router.get("/moderacao/prestadores", exigirNivel('full'), (req, res) => {
             p.id, p.categoria, p.descricao, p.telefone, p.cor, p.lat, p.lng,
             p.horario_abre AS horarioAbre, p.horario_fecha AS horarioFecha,
             p.dias_semana AS diasSemana, p.tags, p.criado_em AS criadoEm,
-            p.dono_usuario_id AS donoUsuarioId,
-            u.nome AS donoNome, u.email AS donoEmail
+            p.dono_usuario_id AS donoUsuarioId, p.pasta_posicao AS pastaPosicao,
+            u.nome AS donoNome, u.email AS donoEmail, u.bloqueado AS donoBloqueado
         FROM prestadores p
         LEFT JOIN usuarios u ON u.id = p.dono_usuario_id
         ORDER BY p.criado_em DESC
@@ -2880,6 +2884,7 @@ router.get("/moderacao/prestadores", exigirNivel('full'), (req, res) => {
         prestadores: filtrados.map(p => ({
             ...p,
             nome: p.donoNome, // prestador não tem nome próprio — herdado do dono (ver formatarPrestador.js)
+            donoBloqueado: !!p.donoBloqueado,
             tags: p.tags ? JSON.parse(p.tags) : [],
             diasSemana: p.diasSemana ? JSON.parse(p.diasSemana) : [0, 1, 2, 3, 4, 5, 6]
         }))
@@ -2887,10 +2892,14 @@ router.get("/moderacao/prestadores", exigirNivel('full'), (req, res) => {
 });
 
 // GET /api/admin/moderacao/prestadores/:id
+// Inclui `capas`: quais das 4 fotos de capa + o vídeo de fato existem no
+// disco (ver utils/midia.js) — a tela de moderação usa isso pra saber
+// quais botões "remover" mostrar, sem precisar tentar carregar cada
+// slot às cegas (mesmo motivo de capasDisponiveis() já existir).
 router.get("/moderacao/prestadores/:id", exigirNivel('full'), (req, res) => {
     const linha = db.prepare(`
         SELECT
-            p.*, u.nome AS donoNome, u.email AS donoEmail
+            p.*, u.nome AS donoNome, u.email AS donoEmail, u.bloqueado AS donoBloqueado
         FROM prestadores p
         LEFT JOIN usuarios u ON u.id = p.dono_usuario_id
         WHERE p.id = ?
@@ -2901,8 +2910,10 @@ router.get("/moderacao/prestadores/:id", exigirNivel('full'), (req, res) => {
     res.json({
         ...linha,
         nome: linha.donoNome,
+        donoBloqueado: !!linha.donoBloqueado,
         tags: linha.tags ? JSON.parse(linha.tags) : [],
-        diasSemana: linha.dias_semana ? JSON.parse(linha.dias_semana) : [0, 1, 2, 3, 4, 5, 6]
+        diasSemana: linha.dias_semana ? JSON.parse(linha.dias_semana) : [0, 1, 2, 3, 4, 5, 6],
+        capas: capasDisponiveis(linha.dono_usuario_id, linha.pasta_posicao)
     });
 });
 
@@ -3099,6 +3110,173 @@ router.delete("/moderacao/usuarios/:id", exigirNivel('full'), (req, res) => {
         entradas
             .filter(nome => nome.startsWith(`${req.params.id}-p-`))
             .forEach(nome => fs.rm(path.join(BASE_UPLOADS_MODERACAO, nome), { recursive: true, force: true }, () => {}));
+    });
+
+    res.status(204).end();
+});
+
+// ==========================================================================
+// MÍDIA DE CAPA (prestador) — remoção pela moderação, sem checagem de
+// dono (mesmo espírito irrestrito do resto de /moderacao). Não existe
+// upload aqui, só remoção: pra trocar a mídia, o próprio dono sobe uma
+// nova pelas rotas normais (POST /:id/foto-capa/:indice, POST
+// /:id/capa-video em routes/prestadores.js) — moderação só tira o que
+// não cumpre as diretrizes, não substitui por outra coisa.
+//
+// fs.rm({force:true}) não erra se o arquivo já não existir — mesmo
+// padrão idempotente usado em removerFotosCapaAntigas/
+// removerVideoCapaAntigo (routes/prestadores.js), reaproveitado aqui via
+// pastaCapaPrestador (utils/midia.js) pra não duplicar a lógica de
+// caminho num terceiro lugar.
+// ==========================================================================
+
+// DELETE /api/admin/moderacao/prestadores/:id/capa/:indice — indice 1 a 4,
+// mesma numeração usada em POST /:id/foto-capa/:indice.
+router.delete("/moderacao/prestadores/:id/capa/:indice", exigirNivel('full'), (req, res) => {
+    const prestador = db.prepare("SELECT dono_usuario_id, pasta_posicao FROM prestadores WHERE id = ?").get(req.params.id);
+    if (!prestador) return res.status(404).json({ erro: "Prestador não encontrado." });
+
+    const indice = Number(req.params.indice);
+    if (!Number.isInteger(indice) || indice < 1 || indice > 4) {
+        return res.status(400).json({ erro: "indice precisa ser um número entre 1 e 4." });
+    }
+
+    const sufixo = indice === 1 ? "" : `-${indice}`;
+    const arquivo = `capa${sufixo}.webp`;
+    fs.rm(path.join(pastaCapaPrestador(prestador.dono_usuario_id, prestador.pasta_posicao), arquivo), { force: true }, () => {});
+
+    registrarAuditoria({
+        ator: nomeModerador(req), origem: 'moderacao', acao: "editar",
+        entidadeTipo: "prestador", entidadeId: req.params.id,
+        alteracoes: { capa: { de: `slot ${indice} removido pela moderação`, para: null } }
+    });
+
+    res.status(204).end();
+});
+
+// DELETE /api/admin/moderacao/prestadores/:id/capa-video
+router.delete("/moderacao/prestadores/:id/capa-video", exigirNivel('full'), (req, res) => {
+    const prestador = db.prepare("SELECT dono_usuario_id, pasta_posicao, capa_tipo FROM prestadores WHERE id = ?").get(req.params.id);
+    if (!prestador) return res.status(404).json({ erro: "Prestador não encontrado." });
+
+    fs.rm(path.join(pastaCapaPrestador(prestador.dono_usuario_id, prestador.pasta_posicao), "capa.mp4"), { force: true }, () => {});
+    // Volta capa_tipo pra 'foto' — mesma regra de exclusividade do upload
+    // (POST /:id/foto-capa, /:id/capa-video em routes/prestadores.js):
+    // sem vídeo, o prestador não pode continuar "marcado" como tendo capa
+    // em vídeo, senão o front tentaria carregar um capa.mp4 que não
+    // existe mais.
+    db.prepare("UPDATE prestadores SET capa_tipo = 'foto' WHERE id = ?").run(req.params.id);
+
+    registrarAuditoria({
+        ator: nomeModerador(req), origem: 'moderacao', acao: "editar",
+        entidadeTipo: "prestador", entidadeId: req.params.id,
+        alteracoes: { capaVideo: { de: "removido pela moderação", para: null } }
+    });
+
+    res.status(204).end();
+});
+
+// DELETE /api/admin/moderacao/usuarios/:id/avatar — remove a foto própria
+// da conta (mesmo efeito de DELETE /api/usuarios/:id/avatar, sem exigir
+// que seja o próprio dono). Volta a valer a foto do Google (avatar_url,
+// sincronizada a cada login) por baixo.
+router.delete("/moderacao/usuarios/:id/avatar", exigirNivel('full'), (req, res) => {
+    const usuario = db.prepare("SELECT id FROM usuarios WHERE id = ?").get(req.params.id);
+    if (!usuario) return res.status(404).json({ erro: "Usuário não encontrado." });
+
+    db.prepare("UPDATE usuarios SET avatar_customizado = 0 WHERE id = ?").run(req.params.id);
+    fs.rm(path.join(BASE_UPLOADS_MODERACAO, req.params.id, "avatar", "avatar.webp"), { force: true }, () => {});
+
+    registrarAuditoria({
+        ator: nomeModerador(req), origem: 'moderacao', acao: "editar",
+        entidadeTipo: "usuario", entidadeId: req.params.id,
+        alteracoes: { avatar: { de: "foto própria removida pela moderação", para: null } }
+    });
+
+    res.status(204).end();
+});
+
+// ==========================================================================
+// BLOQUEIO DE CONTA — ver migração usuarios.bloqueado em db.js pro
+// raciocínio completo (por que é separado de excluir, e por que
+// identidade.js/entrar-google checam isso em request e em login).
+// ==========================================================================
+
+// PATCH /api/admin/moderacao/usuarios/:id/bloqueio  { bloqueado: bool, motivo? }
+router.patch("/moderacao/usuarios/:id/bloqueio", exigirNivel('full'), (req, res) => {
+    const usuario = db.prepare("SELECT id, nome, bloqueado FROM usuarios WHERE id = ?").get(req.params.id);
+    if (!usuario) return res.status(404).json({ erro: "Usuário não encontrado." });
+
+    if (typeof req.body.bloqueado !== "boolean") {
+        return res.status(400).json({ erro: "bloqueado precisa ser true ou false." });
+    }
+
+    const bloqueado = req.body.bloqueado;
+    const motivo = bloqueado ? (sanitizarTextoModeracao(req.body.motivo, 300) || null) : null;
+    const agora = bloqueado ? Date.now() : null;
+
+    db.prepare("UPDATE usuarios SET bloqueado = ?, bloqueado_motivo = ?, bloqueado_em = ? WHERE id = ?")
+        .run(bloqueado ? 1 : 0, motivo, agora, req.params.id);
+
+    registrarAuditoria({
+        ator: nomeModerador(req), origem: 'moderacao', acao: "editar",
+        entidadeTipo: "usuario", entidadeId: req.params.id,
+        alteracoes: { bloqueado: { de: !!usuario.bloqueado, para: bloqueado }, motivo: motivo || undefined }
+    });
+
+    res.json({ id: usuario.id, bloqueado, bloqueadoMotivo: motivo, bloqueadoEm: agora });
+});
+
+// ==========================================================================
+// BANIMENTO POR E-MAIL — ver migração emails_bloqueados em db.js. Cobre
+// impedir login/cadastro futuro por e-mail, mesmo sem conta existente
+// (ou depois de a conta ter sido excluída).
+// ==========================================================================
+
+// GET /api/admin/moderacao/emails-bloqueados
+router.get("/moderacao/emails-bloqueados", exigirNivel('full'), (req, res) => {
+    const linhas = db.prepare(`
+        SELECT email, motivo, moderador, criado_em AS criadoEm
+        FROM emails_bloqueados ORDER BY criado_em DESC
+    `).all();
+    res.json({ emailsBloqueados: linhas });
+});
+
+// POST /api/admin/moderacao/emails-bloqueados  { email, motivo? }
+router.post("/moderacao/emails-bloqueados", exigirNivel('full'), (req, res) => {
+    const email = sanitizarTextoModeracao(req.body.email, 190).toLowerCase();
+    if (!email || !email.includes("@")) {
+        return res.status(400).json({ erro: "Informe um e-mail válido." });
+    }
+    const motivo = sanitizarTextoModeracao(req.body.motivo, 300) || null;
+
+    db.prepare(`
+        INSERT INTO emails_bloqueados (email, motivo, moderador, criado_em)
+        VALUES (@email, @motivo, @moderador, @criado_em)
+        ON CONFLICT(email) DO UPDATE SET motivo = @motivo, moderador = @moderador, criado_em = @criado_em
+    `).run({ email, motivo, moderador: nomeModerador(req), criado_em: Date.now() });
+
+    registrarAuditoria({
+        ator: nomeModerador(req), origem: 'moderacao', acao: "editar",
+        entidadeTipo: "usuario", entidadeId: email,
+        alteracoes: { emailBloqueado: { de: null, para: motivo || true } }
+    });
+
+    res.status(201).json({ email, motivo });
+});
+
+// DELETE /api/admin/moderacao/emails-bloqueados/:email
+router.delete("/moderacao/emails-bloqueados/:email", exigirNivel('full'), (req, res) => {
+    const email = decodeURIComponent(req.params.email).toLowerCase();
+    const existente = db.prepare("SELECT email FROM emails_bloqueados WHERE email = ?").get(email);
+    if (!existente) return res.status(404).json({ erro: "Este e-mail não está bloqueado." });
+
+    db.prepare("DELETE FROM emails_bloqueados WHERE email = ?").run(email);
+
+    registrarAuditoria({
+        ator: nomeModerador(req), origem: 'moderacao', acao: "editar",
+        entidadeTipo: "usuario", entidadeId: email,
+        alteracoes: { emailBloqueado: { de: true, para: null } }
     });
 
     res.status(204).end();
