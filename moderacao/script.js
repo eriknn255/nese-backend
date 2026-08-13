@@ -18,6 +18,7 @@ const ENDPOINT_USUARIO_DETALHE_BASE = `${BASE_API}/dashboard/usuarios/`;
 const ENDPOINT_MODERACAO_USUARIOS = `${BASE_API}/moderacao/usuarios/`;
 const ENDPOINT_MODERACAO_PRESTADORES = `${BASE_API}/moderacao/prestadores`;
 const ENDPOINT_MODERACAO_LOG = `${BASE_API}/moderacao/log`;
+const ENDPOINT_EMAILS_BLOQUEADOS = `${BASE_API}/moderacao/emails-bloqueados`;
 
 // Mesma origem do backend, pra resolver avatar customizado (caminho
 // relativo) — mesmo raciocínio de resolverAvatarUrl em script.js.
@@ -269,7 +270,7 @@ async function carregarUsuarios() {
   } catch (e) {
     mostrarErro(`Não foi possível carregar usuários (${e.message}).`);
     document.getElementById('usuarios-tbody').innerHTML =
-      `<tr><td colspan="6" class="empty-state">${escaparHtml(e.message)}</td></tr>`;
+      `<tr><td colspan="7" class="empty-state">${escaparHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -285,7 +286,7 @@ function renderUsuarios(usuarios) {
   const tbody = document.getElementById('usuarios-tbody');
 
   if (!usuarios || usuarios.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhum usuário encontrado.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Nenhum usuário encontrado.</td></tr>';
     return;
   }
 
@@ -302,6 +303,9 @@ function renderUsuarios(usuarios) {
             </div>
           </div>
         </td>
+        <td>${u.bloqueado
+          ? '<span class="badge-status badge-status-bloqueado">Bloqueado</span>'
+          : '<span class="badge-status badge-status-ativo">Ativo</span>'}</td>
         <td class="id-mono">${escaparHtml(u.id)}</td>
         <td>—</td>
         <td>—</td>
@@ -333,6 +337,16 @@ async function abrirEdicaoUsuario(id) {
             <div class="modal-field-value id-mono">${escaparHtml(u.id)}</div>
           </div>
           <div>
+            <div class="modal-field-label">Status</div>
+            <div id="status-usuario-atual">
+              ${u.bloqueado
+                ? `<span class="badge-status badge-status-bloqueado">Bloqueado</span>
+                   ${u.bloqueadoMotivo ? `<div class="last-seen" style="margin-top:4px;">Motivo: ${escaparHtml(u.bloqueadoMotivo)}</div>` : ''}
+                   ${u.bloqueadoEm ? `<div class="last-seen">Desde: ${formatarDataExata(u.bloqueadoEm)}</div>` : ''}`
+                : '<span class="badge-status badge-status-ativo">Ativo</span>'}
+            </div>
+          </div>
+          <div>
             <label class="modal-field-label" for="campo-nome">Nome</label>
             <input type="text" id="campo-nome" class="table-busca" style="width:100%;" value="${escaparHtml(u.nome)}">
           </div>
@@ -348,6 +362,16 @@ async function abrirEdicaoUsuario(id) {
             <label class="modal-field-label" for="campo-cpf-cnpj">CPF/CNPJ</label>
             <input type="text" id="campo-cpf-cnpj" class="table-busca" style="width:100%;" value="${escaparHtml(u.cpfCnpj || '')}">
           </div>
+        </div>
+
+        <div class="modal-subsection-title">Moderação de conta</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          ${u.avatarCustomizado > 0
+            ? `<button type="button" id="btn-remover-avatar" class="toolbar-btn toolbar-btn-perigo">Remover foto de perfil</button>`
+            : ''}
+          ${u.bloqueado
+            ? `<button type="button" id="btn-toggle-bloqueio" class="toolbar-btn">Desbloquear conta</button>`
+            : `<button type="button" id="btn-toggle-bloqueio" class="toolbar-btn toolbar-btn-perigo">Bloquear conta</button>`}
         </div>
 
         <div class="modal-subsection-title">Serviços desta conta (${data.prestadores.length})</div>
@@ -405,6 +429,57 @@ async function abrirEdicaoUsuario(id) {
           body: JSON.stringify(corpo2)
         });
         fecharModal();
+        carregarUsuarios();
+      } catch (e) {
+        erroEl.textContent = e.message;
+        erroEl.style.display = 'block';
+      }
+    });
+
+    const btnRemoverAvatar = document.getElementById('btn-remover-avatar');
+    if (btnRemoverAvatar) {
+      btnRemoverAvatar.addEventListener('click', async () => {
+        if (!confirm('Remover a foto de perfil desta conta? Volta a valer a foto do Google (se houver).')) return;
+        try {
+          await chamarApi(`${ENDPOINT_MODERACAO_USUARIOS}${id}/avatar`, { method: 'DELETE' });
+          abrirEdicaoUsuario(id); // reabre o modal já atualizado
+          carregarUsuarios();
+        } catch (e) {
+          const erroEl = document.getElementById('form-usuario-erro');
+          erroEl.textContent = e.message;
+          erroEl.style.display = 'block';
+        }
+      });
+    }
+
+    document.getElementById('btn-toggle-bloqueio').addEventListener('click', async () => {
+      const erroEl = document.getElementById('form-usuario-erro');
+      erroEl.style.display = 'none';
+
+      if (u.bloqueado) {
+        if (!confirm(`Desbloquear a conta "${u.nome}"? Ela volta a conseguir entrar no Nese.`)) return;
+        try {
+          await chamarApi(`${ENDPOINT_MODERACAO_USUARIOS}${id}/bloqueio`, {
+            method: 'PATCH',
+            body: JSON.stringify({ bloqueado: false })
+          });
+          abrirEdicaoUsuario(id);
+          carregarUsuarios();
+        } catch (e) {
+          erroEl.textContent = e.message;
+          erroEl.style.display = 'block';
+        }
+        return;
+      }
+
+      const motivo = prompt(`Bloquear a conta "${u.nome}"? Ela é impedida de entrar/usar o app até ser desbloqueada.\n\nMotivo (opcional, aparece no histórico):`);
+      if (motivo === null) return; // cancelou o prompt
+      try {
+        await chamarApi(`${ENDPOINT_MODERACAO_USUARIOS}${id}/bloqueio`, {
+          method: 'PATCH',
+          body: JSON.stringify({ bloqueado: true, motivo: motivo.trim() || undefined })
+        });
+        abrirEdicaoUsuario(id);
         carregarUsuarios();
       } catch (e) {
         erroEl.textContent = e.message;
@@ -562,6 +637,20 @@ async function abrirEdicaoPrestador(id) {
           </div>
         </div>
 
+        <div class="modal-subsection-title">Mídia de capa</div>
+        <div class="midia-capa-grid" id="midia-capa-grid">
+          ${[1, 2, 3, 4].map(indice => {
+            const chave = indice === 1 ? 'capa' : `capa${indice}`;
+            const existe = !!(p.capas && p.capas[chave]);
+            return existe
+              ? `<div class="midia-capa-slot">Foto ${indice}<button type="button" class="midia-capa-remover" data-remover-capa="${indice}">remover</button></div>`
+              : `<div class="midia-capa-slot midia-capa-vazia">Foto ${indice} — vazio</div>`;
+          }).join('')}
+          ${p.capas && p.capas.video
+            ? `<div class="midia-capa-slot">Vídeo de capa<button type="button" class="midia-capa-remover" data-remover-capa-video>remover</button></div>`
+            : `<div class="midia-capa-slot midia-capa-vazia">Vídeo — vazio</div>`}
+        </div>
+
         <div class="modal-subsection-title">Histórico deste prestador</div>
         <div id="historico-prestador">
           <div class="empty-state" style="padding:14px 0;">carregando…</div>
@@ -630,6 +719,36 @@ async function abrirEdicaoPrestador(id) {
         erroEl.style.display = 'block';
       }
     });
+
+    corpo.querySelectorAll('[data-remover-capa]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const indice = btn.dataset.removerCapa;
+        if (!confirm(`Remover a foto ${indice} da capa deste prestador?`)) return;
+        try {
+          await chamarApi(`${ENDPOINT_MODERACAO_PRESTADORES}/${id}/capa/${indice}`, { method: 'DELETE' });
+          abrirEdicaoPrestador(id); // reabre o modal já atualizado
+        } catch (e) {
+          const erroEl = document.getElementById('form-prestador-erro');
+          erroEl.textContent = e.message;
+          erroEl.style.display = 'block';
+        }
+      });
+    });
+
+    const btnRemoverCapaVideo = corpo.querySelector('[data-remover-capa-video]');
+    if (btnRemoverCapaVideo) {
+      btnRemoverCapaVideo.addEventListener('click', async () => {
+        if (!confirm('Remover o vídeo de capa deste prestador?')) return;
+        try {
+          await chamarApi(`${ENDPOINT_MODERACAO_PRESTADORES}/${id}/capa-video`, { method: 'DELETE' });
+          abrirEdicaoPrestador(id);
+        } catch (e) {
+          const erroEl = document.getElementById('form-prestador-erro');
+          erroEl.textContent = e.message;
+          erroEl.style.display = 'block';
+        }
+      });
+    }
 
   } catch (e) {
     corpo.innerHTML = `<div class="empty-state">${escaparHtml(e.message)}</div>`;
@@ -791,6 +910,96 @@ async function buscarHistoricoEntidadeHtml(entidadeTipo, entidadeId) {
   }
 }
 
+
+// ==========================================================================
+// E-MAILS BLOQUEADOS — banimento por e-mail, independente de existir conta
+// (ver POST/GET/DELETE /moderacao/emails-bloqueados em admin.js e a
+// migração emails_bloqueados em db.js pro raciocínio completo). Reaproveita
+// o mesmo modal genérico dos outros dois (usuário/prestador).
+// ==========================================================================
+
+document.getElementById('btn-emails-bloqueados').addEventListener('click', abrirEmailsBloqueados);
+
+async function abrirEmailsBloqueados() {
+  abrirModal('E-mails bloqueados');
+  const corpo = document.getElementById('modal-body');
+  corpo.innerHTML = '<div class="empty-state">carregando…</div>';
+
+  try {
+    await renderEmailsBloqueados();
+  } catch (e) {
+    corpo.innerHTML = `<div class="empty-state">${escaparHtml(e.message)}</div>`;
+  }
+}
+
+async function renderEmailsBloqueados() {
+  const corpo = document.getElementById('modal-body');
+  const data = await chamarApi(ENDPOINT_EMAILS_BLOQUEADOS);
+  const lista = data.emailsBloqueados || [];
+
+  corpo.innerHTML = `
+    <p class="last-seen" style="margin-bottom:12px;">
+      Impede login e criação de conta com este e-mail, mesmo que a conta ainda não exista
+      ou já tenha sido excluída.
+    </p>
+
+    <form id="form-bloquear-email" style="display:flex; gap:8px; margin-bottom:16px;">
+      <input type="email" id="campo-novo-email-bloqueado" class="table-busca" style="flex:1;" placeholder="email@exemplo.com" required>
+      <button type="submit" class="toolbar-btn toolbar-btn-perigo">Bloquear</button>
+    </form>
+
+    <div id="emails-bloqueados-erro" class="empty-state" style="color: var(--red); display:none;"></div>
+
+    <div id="emails-bloqueados-lista">
+      ${lista.length === 0
+        ? '<div class="empty-state">Nenhum e-mail bloqueado.</div>'
+        : lista.map(item => `
+          <div class="emails-bloqueados-item">
+            <div>
+              <div>${escaparHtml(item.email)}</div>
+              ${item.motivo ? `<div class="last-seen" style="opacity:0.7;">${escaparHtml(item.motivo)}</div>` : ''}
+            </div>
+            <button type="button" class="midia-capa-remover" data-desbloquear-email="${escaparHtml(item.email)}">remover</button>
+          </div>
+        `).join('')}
+    </div>
+  `;
+
+  document.getElementById('form-bloquear-email').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const erroEl = document.getElementById('emails-bloqueados-erro');
+    erroEl.style.display = 'none';
+    const campo = document.getElementById('campo-novo-email-bloqueado');
+    const email = campo.value.trim();
+    const motivo = prompt('Motivo do bloqueio (opcional):') || undefined;
+
+    try {
+      await chamarApi(ENDPOINT_EMAILS_BLOQUEADOS, {
+        method: 'POST',
+        body: JSON.stringify({ email, motivo })
+      });
+      await renderEmailsBloqueados();
+    } catch (e) {
+      erroEl.textContent = e.message;
+      erroEl.style.display = 'block';
+    }
+  });
+
+  corpo.querySelectorAll('[data-desbloquear-email]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const email = btn.dataset.desbloquearEmail;
+      if (!confirm(`Desbloquear "${email}"? Volta a poder entrar/criar conta com esse e-mail.`)) return;
+      try {
+        await chamarApi(`${ENDPOINT_EMAILS_BLOQUEADOS}/${encodeURIComponent(email)}`, { method: 'DELETE' });
+        await renderEmailsBloqueados();
+      } catch (e) {
+        const erroEl = document.getElementById('emails-bloqueados-erro');
+        erroEl.textContent = e.message;
+        erroEl.style.display = 'block';
+      }
+    });
+  });
+}
 
 // ==========================================================================
 // MODAL genérico (mesmo markup reaproveitado do dashboard)
