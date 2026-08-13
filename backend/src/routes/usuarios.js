@@ -149,7 +149,35 @@ router.post("/entrar-google", async (req, res) => {
     // em contas sem foto configurada (payload simplesmente omite o campo).
     const avatarUrl = payload.picture || null;
 
-    let usuario = db.prepare("SELECT id, nome, email, telefone, cpf_cnpj AS cpfCnpj, avatar_url AS avatarUrl, avatar_customizado AS avatarCustomizado FROM usuarios WHERE google_sub = ?").get(googleSub);
+    // Banimento por e-mail (ver moderacao/emails-bloqueados em admin.js) —
+    // checado ANTES de tocar em `usuarios`, cobre tanto "nunca teve conta"
+    // quanto "excluiu a conta bloqueada e tentou de novo com o mesmo
+    // e-mail" (ver comentário completo na migração emails_bloqueados em
+    // db.js). Case-insensitive: e-mail não diferencia maiúscula/minúscula
+    // na prática (Google normaliza igual).
+    if (email) {
+        const emailBloqueado = db.prepare(
+            "SELECT motivo FROM emails_bloqueados WHERE LOWER(email) = LOWER(?)"
+        ).get(email);
+        if (emailBloqueado) {
+            return res.status(403).json({ erro: "Este e-mail está impedido de acessar o Nese." });
+        }
+    }
+
+    let usuario = db.prepare("SELECT id, nome, email, telefone, cpf_cnpj AS cpfCnpj, avatar_url AS avatarUrl, avatar_customizado AS avatarCustomizado, bloqueado, bloqueado_motivo AS bloqueadoMotivo FROM usuarios WHERE google_sub = ?").get(googleSub);
+
+    // Conta já existe e está bloqueada pela moderação (ver PATCH
+    // /admin/moderacao/usuarios/:id/bloqueio) — recusa o login antes de
+    // emitir qualquer token novo. Não INSERT/UPDATE nenhum acontece nesse
+    // ramo, então last_seen_at/avatar_url também não mudam pra uma conta
+    // bloqueada continuar "viva" nas métricas.
+    if (usuario && usuario.bloqueado) {
+        return res.status(403).json({
+            erro: usuario.bloqueadoMotivo
+                ? `Esta conta foi bloqueada: ${usuario.bloqueadoMotivo}`
+                : "Esta conta foi bloqueada pela moderação."
+        });
+    }
 
     if (!usuario) {
         const novo = { id: uuidv4(), nome, email, google_sub: googleSub, avatar_url: avatarUrl, criado_em: Date.now() };
@@ -221,6 +249,10 @@ router.post("/entrar-google", async (req, res) => {
         // está sendo exibido de fato.
         db.prepare("UPDATE usuarios SET avatar_url = ? WHERE id = ?").run(avatarUrl, usuario.id);
         usuario.avatarUrl = avatarUrl;
+        // bloqueado já foi checado acima (sempre false daqui pra baixo) —
+        // não faz sentido nenhum pro cliente, tira do payload de resposta.
+        delete usuario.bloqueado;
+        delete usuario.bloqueadoMotivo;
     }
 
     const token = assinarTokenSessao(usuario.id);
