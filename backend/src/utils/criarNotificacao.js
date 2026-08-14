@@ -23,9 +23,9 @@ function criarNotificacao({ usuarioId, tipo, titulo, corpo = null, link = null }
         // in-app já existe e a pessoa a vê ao abrir o app. Na ordem inversa,
         // um push poderia apontar pra algo que não está na lista.
         //
-        // Dentro do try mesmo o enviarPush() já engolindo os próprios erros:
-        // a consulta ao banco que ele faz é síncrona e pode lançar, e nada
-        // aqui pode derrubar a ação principal.
+        // Dentro do try mesmo com o enviarPush() já engolindo os próprios
+        // erros: a consulta ao banco que ele faz é síncrona e pode lançar, e
+        // nada aqui pode derrubar a ação principal.
         enviarPush({ usuarioId, titulo, corpo, link });
     } catch (erro) {
         // Loga e segue — ver comentário acima sobre não derrubar a ação principal.
