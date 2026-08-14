@@ -464,7 +464,7 @@ function garantirPastaPrestador(id) {
     fs.mkdirSync(pastaPrestador(id), { recursive: true });
 }
 
-const TAMANHO_MAXIMO_FOTO_PRESTADOR = 6 * 1024 * 1024; // 6MB, mesma folga da foto de avaliação
+const TAMANHO_MAXIMO_FOTO_PRESTADOR = 30 * 1024 * 1024; // 30MB
 
 // Sufixos dos 4 slots de foto de capa (slot 1 não leva sufixo — mesmo
 // padrão de fotosCapaPrestador() no front). fs.rm({force:true}) não erra
@@ -609,7 +609,7 @@ function comprimirVideoCapa(bufferOriginal, destinoFinal) {
 
 
 
-const TAMANHO_MAXIMO_VIDEO_CAPA = 70 * 1024 * 1024; // 70MB — combinado com Erik
+const TAMANHO_MAXIMO_VIDEO_CAPA = 70 * 1024 * 1024; // 70MB
 
 const uploadVideoCapaPrestador = multer({
     storage: multer.memoryStorage(),
