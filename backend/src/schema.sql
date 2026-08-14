@@ -116,6 +116,27 @@ CREATE INDEX IF NOT EXISTS idx_prestadores_dono ON prestadores(dono_usuario_id);
 -- reais: contagem de não lidas (nao-lidas) e listagem geral (GET /).
 CREATE INDEX IF NOT EXISTS idx_notificacoes_usuario ON notificacoes(usuario_id, criado_em DESC);
 
+-- Aparelhos que recebem push da conta (ver utils/push.js). Cabe aqui, e não
+-- numa "migração leve" do db.js: aquelas existem só pra ALTER TABLE em tabela
+-- já existente. Este arquivo roda inteiro a cada boot (db.exec(schema)) e todo
+-- CREATE aqui é IF NOT EXISTS — criar tabela nova já é idempotente.
+CREATE TABLE IF NOT EXISTS dispositivos (
+    -- O token É a identidade do aparelho pro FCM. Chave primária nele resolve
+    -- de graça reinstalar/trocar de conta: o mesmo token nunca aparece duas
+    -- vezes com donos diferentes.
+    token TEXT PRIMARY KEY,
+    usuario_id TEXT NOT NULL,
+    plataforma TEXT NOT NULL DEFAULT 'android',
+    criado_em INTEGER NOT NULL,
+    -- Com ON DELETE CASCADE (e foreign_keys=ON, ver db.js) excluir a conta
+    -- leva os aparelhos junto — diferente de `notificacoes`, esta tabela não
+    -- precisa de DELETE próprio na transação de DELETE /api/usuarios/:id.
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+);
+
+-- O envio consulta sempre por usuário ("todos os aparelhos desta conta").
+CREATE INDEX IF NOT EXISTS idx_dispositivos_usuario ON dispositivos(usuario_id);
+
 -- Único registro que SOBREVIVE à exclusão de uma conta (ver DELETE
 -- /api/usuarios/:id em routes/usuarios.js) — de propósito, sem FOREIGN KEY
 -- pra `usuarios`: a linha em `usuarios` já não existe mais no momento em
